@@ -1,0 +1,116 @@
+========================================================================
+    QUY TẮC ĐẶT TÊN CODE C (CAMELCASE) & QUY TẮC COMMIT GITHUB
+========================================================================
+
+PHẦN 1: QUY TẮC ĐẶT TÊN (NAMING CONVENTION) - HỆ CAMELCASE
+------------------------------------------------------------------------
+Quy tắc đặt tên có rất nhiều kiểu, nhưng mỗi team sẽ có chuẩn riêng, nên team cần tuân thủ sự nhất quán sau:
+	- Đặt tên tiếng anh
+	- Comment tiếng việt
+
+1. Biến cục bộ (Local Variables)
+   - Cú pháp: lowerCamelCase (chữ cái đầu viết thường, các từ tiếp theo viết hoa chữ cái đầu).
+   - Ví dụ: sensorValue, motorSpeed, timeoutCounter.
+
+2. Biến toàn cục (Global Variables)
+   - Cú pháp: Thêm tiền tố g_ + lowerCamelCase. Việc này giúp dễ dàng nhận biết biến toàn cục để tránh xung đột.
+   - Ví dụ: g_systemState, g_isDeviceReady.
+
+8. Biến logic (boolean)
+   - Cú Pháp: Thêm tiền tố is, has, can, should + PascalCase.
+      - Chi tiết các tiền tố:
+         - is: Chỉ trạng thái hiện tại của hệ thống hoặc biến.
+            Ví dụ: isReady, isConnected, isValid.
+         - has: Chỉ việc đang sở hữu một trạng thái, dữ liệu, hoặc một sự kiện đã xảy ra.
+            Ví dụ: hasError, hasNewData.
+         - can: Chỉ khả năng có thể thực hiện một hành động nào đó.
+            Ví dụ: canTransmit, canWriteToEeprom.
+         - should: Chỉ một hành động cần (hoặc nên) được thực hiện khi thỏa mãn điều kiện.
+            Ví dụ: shouldUpdateDisplay, shouldStopMotor.
+   Lưu ý: thấy khó đặt tên thì hỏi AI nó đặt cho.
+      - Mở rộng: là biến toàn cục thì thêm tiền tố g + "_" + is, has, can, should + PascalCase.
+      - Ví dụ: g_isReady, g_canTransmit.
+
+3. Hàm (Functions)
+   - Cú pháp: PascalCase (Viết hoa chữ cái đầu luôn (PascalCase) để phân biệt rõ với biến).
+   - Ví dụ: ReadTemperatureSensor(), InitPwmTimer(), CalculatePid().
+      - Mở rộng: Hàm private (dành cho lập trình kiểu hướng đối tượng).
+      - thêm tiền tố "_" + PascalCase.
+      - Ví dụ: _ReadTemperatureSensor(), _InitPwmTimer().
+
+9. Hàm Logic (Functions Boolean)
+   - Cú pháp: PascalCase + câu hỏi nghi vấn. Tên hàm phải trả lời được câu hỏi "Đúng hay Sai?"
+      - Chi tiết các tiền tố:
+         - Is: Kiểm tra một trạng thái bền vững.
+            VÍ DỤ: IsSystemReady(), IsBatteryLow(), IsDeviceConnected().
+         - Has: Kiểm tra xem một sự kiện đã xảy ra hoặc một thành phần có tồn tại không.
+            VÍ DỤ: HasBufferOverflowed(), HasNewMessage(), HasExternalInterrupt().
+         - Can: Kiểm tra khả năng thực thi một hành động (quyền hạn/điều kiện cần).
+            VÍ DỤ: CanWriteStorage(), CanStartMotor(), CanExecuteCommand().
+         - Should: Kiểm tra xem có nên thực hiện hành động nào đó tại thời điểm này không.
+            VÍ DỤ: ShouldRetryConnection(), ShouldClearDisplay().
+         - Check: Dùng khi hàm vừa kiểm tra vừa có thể cập nhật cờ trạng thái nhẹ.
+            VÍ DỤ: CheckSensorStatus().
+   Lưu ý: thấy khó đặt tên thì hỏi AI nó đặt cho.
+
+4. Hằng số và Macro (Constants & Macros)
+   - Cú pháp: UPPER_SNAKE_CASE (Viết hoa toàn bộ, cách nhau bằng dấu gạch dưới). 
+   - LƯU Ý: Tuyệt đối KHÔNG dùng camelCase cho macro/define để tránh nhầm lẫn nghiêm trọng với biến thông thường trong C.
+   - Ví dụ: MAX_BUFFER_SIZE, PIN_LED_RED.
+
+5. Kiểu dữ liệu tự định nghĩa (Struct / Enum / Typedef)
+   - Cú pháp: lowerCamelCase + hậu tố _t.
+   - Ví dụ:
+     typedef struct {
+         int x;
+         int y;
+     } pointCoordinates_t;
+
+6. Con trỏ (Pointers)
+   - Cú pháp: Thêm tiền tố p + PascalCase.
+   - Ví dụ: pDataBuffer, pSensorConfig.
+      - Mở rộng: con trỏ toàn cục thì Phạm vi + "_" + p + PascalCase.
+      - Ví dụ: g_pDataBuffer, g_pSensorConfig
+
+7. Trạng thái Enum (Enum values)
+   - Cú pháp: Tiền tố tên Enum (viết hoa) + _ + UPPER_SNAKE_CASE.
+   - Ví dụ: STATUS_OK, STATUS_ERROR_TIMEOUT.
+
+
+PHẦN 2: QUY TẮC COMMIT GITHUB (CONVENTIONAL COMMITS)
+------------------------------------------------------------------------
+Giúp lịch sử Git gọn gàng, chuyên nghiệp và dễ dàng tracking lỗi.
+	
+
+1. Cấu trúc cơ bản của một Commit Message:
+   <type>(<scope>): <subject>
+
+2. Các loại <type> bắt buộc:
+   - feat     : Thêm một tính năng mới (ví dụ: code xong module đọc I2C).
+   - fix      : Sửa một lỗi (bug).
+   - refactor : Viết lại code nhưng không làm thay đổi logic hay tính năng (ví dụ: tối ưu lại hàm thuật toán, đổi tên biến cho chuẩn).
+   - docs     : Cập nhật tài liệu (README, comment trong code).
+   - style    : Format lại code (khoảng trắng, dấu phẩy, thiếu dấu chấm phẩy...).
+   - test     : Thêm hoặc sửa các test case.
+   - chore    : Cập nhật các tool build, file cấu hình (.gitignore, Makefile, platformio.ini...).
+
+3. Phạm vi <scope> :
+   - Cho biết commit này ảnh hưởng đến module nào. Viết chữ thường.
+   - Ví dụ: (pwm), (sensor), (wifi), (uart).
+
+4. Tiêu đề <subject>:
+   - Viết ngắn gọn (dưới 50 ký tự).
+   - Không viết hoa chữ cái đầu tiên.
+   - Đặt tên kiểu ra lệnh
+   - Không đặt dấu chấm (.) ở cuối câu.
+
+5. Ví dụ Commit thực tế:
+   - feat(sensor): thêm chức năng đọc nhiệt độ thông qua giao thức I2C
+   - fix(pwm): giải quyết vấn đề tràn dữ liệu ở tần số cao
+   - refactor(core): tối ưu hóa vòng lặp trễ
+   - docs: cập nhật sơ đồ chân cắm trong README
+   - chore: bỏ qua các thư mục đầu ra của bản dựng
+
+========================================================================
+
+Có thắc mắc nào thì hỏi anh hoặc hỏi AI

@@ -1,0 +1,13 @@
+[Unit]
+Description=Radar Obstacle Detection Service (C++ Version)
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/usr/local/etc/connect_radar_for_drone
+ExecStart=/usr/local/etc/connect_radar_for_drone/build/radar_app -r 50 -a 601 -b 300 -G 192.168.0.29 -P 14550
+Restart=always 
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
