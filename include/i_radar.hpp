@@ -40,9 +40,6 @@ public:
     // Parse data từ CAN frame, trả về true nếu hoàn thành 1 chu kỳ parse
     virtual bool ParseCanFrame(const struct can_frame &frame, float droneVForward, float droneVRight) = 0;
 
-    // Lấy danh sách các vật cản
-    virtual std::vector<obstacleData_t> GetObstacles() const = 0;
-
     // Lấy số lượng vật cản hiện tại
     virtual int GetObstacleCount() const = 0;
 };

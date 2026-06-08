@@ -33,6 +33,10 @@ else
     mkdir -p /usr/local/etc/connect_radar_for_drone
 fi
 
+# Tạo thư mục blackbox và thư mục chứa script
+mkdir -p /usr/local/etc/connect_radar_for_drone/blackbox
+mkdir -p /usr/local/etc/connect_radar_for_drone/service
+
 FILE=../build/radar_app
 if [[ -f "$FILE" ]]; then
     rm -rf /usr/local/etc/connect_radar_for_drone/build/
@@ -42,12 +46,21 @@ else
     echo "Failed to install RadarApp"
 fi
 
+# Chép script cấu hình CAN vào thư mục hệ thống và cấp quyền chạy
+cp setup_can.sh /usr/local/etc/connect_radar_for_drone/service/
+chmod +x /usr/local/etc/connect_radar_for_drone/service/setup_can.sh
+
+# Chép 2 file systemd service
+cp can_setup.service /etc/systemd/system/
 cp radar_setup.service /etc/systemd/system/
 
 sudo systemctl daemon-reload
 
-sudo systemctl start radar_setup.service
+sudo systemctl enable can_setup.service
+sudo systemctl start can_setup.service
+
 sudo systemctl enable radar_setup.service
+sudo systemctl start radar_setup.service
 
 echo "Completed"
 echo "################################"

@@ -1,23 +1,23 @@
-#include "CsvLogger.hpp"
+#include "csv_logger.hpp"
 #include <iostream>
 
-CsvLogger::CsvLogger(const std::string& fileName) : m_fileName(fileName) {}
+CsvLogger::CsvLogger(const std::string& filename) : m_filename(filename) {}
 
 CsvLogger::~CsvLogger() {
     Close();
 }
 
 bool CsvLogger::Open() {
-    m_fileStream.open(m_fileName, std::ios::out | std::ios::app);
+    m_fileStream.open(m_filename, std::ios::out | std::ios::app);
     if (!m_fileStream.is_open()) {
-        std::cerr << "Failed to open log file: " << m_fileName << "\n";
+        std::cerr << "CsvLogger: Could not open file " << m_filename << " for writing.\n";
         return false;
     }
     
     // Nếu file trống, ghi header
     m_fileStream.seekp(0, std::ios::end);
     if (m_fileStream.tellp() == 0) {
-        m_fileStream << "TimestampMs,ID,X,Y,Z,Range,Angle,Vx,Vy,Vz,Elevation\n";
+        m_fileStream << "TimestampMs,ID,X,Y,Z,AbsX,AbsY,AbsZ,Range,Angle,Vx,Vy,Vz,VabsX,VabsY,VabsZ,DroneAlt\n";
     }
     
     return true;
@@ -29,12 +29,12 @@ void CsvLogger::Close() {
     }
 }
 
-void CsvLogger::LogObstacles(long long timestampMs, const std::vector<obstacleData_t>& obstacles, float Elevation) {
+void CsvLogger::LogObstacles(long long timestampMs, const std::vector<obstacle_absolute_t>& obstacles, float droneAlt) {
     if (!m_fileStream.is_open()) return;
 
     for (const auto& obs : obstacles) {
         m_fileStream << timestampMs << ","
-                     << obs.id << "," // ID của vật thể không phải của radar
+                     << obs.id << ","
                      << obs.x << ","
                      << obs.y << ","
                      << obs.z << ","
@@ -43,9 +43,8 @@ void CsvLogger::LogObstacles(long long timestampMs, const std::vector<obstacleDa
                      << obs.v_x << ","
                      << obs.v_y << ","
                      << obs.v_z << ","
-                     << Elevation << "\n";
+                     << droneAlt << "\n";
     }
     
-    // Đảm bảo dữ liệu được ghi xuống đĩa
     m_fileStream.flush();
 }

@@ -1,0 +1,12 @@
+[Unit]
+Description=This service run canbus setup for radar
+After=network-online.target
+
+[Service]
+User=root
+Type=oneshot
+WorkingDirectory=/usr/local/etc/connect_radar_for_drone/service
+ExecStart=/usr/bin/sh /usr/local/etc/connect_radar_for_drone/service/setup_can.sh
+
+[Install]
+WantedBy=multi-user.target

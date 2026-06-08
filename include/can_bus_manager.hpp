@@ -1,7 +1,7 @@
 #ifndef CANBUSMANAGER_HPP
 #define CANBUSMANAGER_HPP
 
-#include "IDataLink.hpp"
+#include "i_data_link.hpp"
 #include <string>
 
 class CanBusManager : public IDataLink {
