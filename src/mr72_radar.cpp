@@ -19,25 +19,14 @@ void MR72Radar::Init(float mountingYaw)
 
 bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward, float droneVRight)
 {
-    // Gói tin 0x60A đánh dấu điểm bắt đầu chu kỳ truyền mới
+    // Triết lý: Nhận 1 khung hình điểm vật cản (0x60B) là xử lý và gửi đi luôn, không chờ gói Status (0x60A)
     if (frame.can_id == (MR72_OBJECT_LIST_STATUS + m_id * 0x10))
     {
-        // Ghi nhận chu kỳ trước đó đã xong
-        m_obstacles = m_tempObstacles;
-        m_tempObstacles.clear();
-
-        m_expectedObstacles = frame.data[0];
-
-        return true; // Trả về true báo hiệu kết thúc 1 frame của radar (để có thể lấy dữ liệu)
+        // Bỏ qua gói báo chu kỳ, vì ta xử lý real-time trên từng điểm
+        return false; 
     }
-    // Các gói tin điểm vật cản 0x60B
     else if (frame.can_id == (MR72_OBJECT_GENERAL_INFO + m_id * 0x10))
     {
-        if (m_tempObstacles.size() >= 64)
-        {
-            return false; // Tránh tràn buffer
-        }
-
         obstacle_relative_t obs;
         obs.id = frame.data[0];
 
@@ -49,6 +38,7 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         uint8_t sectorNumber = (frame.data[6] >> 3) & 0x3;
 
         // Chỉ lọc lấy những vật thể đã được xác nhận chắc chắn (Measured == 0x02)
+        // (Sau này có thể mở rộng lấy 0x01, 0x03 tại đây)
         if (sectorNumber != 0x02)
         {
             return false;
@@ -58,19 +48,15 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         obs.y = distLatRaw * 0.2f - 204.6f;     // Chuyển sang hệ tọa độ FRD (Y=Right)
         obs.x = distLongRaw * 0.2f - 500.0f;    // X=Forward
         obs.z = 0.0f;                           // MR72 không cung cấp thông tin độ cao, giả định z=0
-        obs.v_x = vrelLongRaw * 0.25f - 128.0f; // Vận tốc dọc trục x (Forward), bù trừ vận tốc drone sẽ được xử lý ở luồng DataProcessingThread
-        obs.v_y = vrelLatRaw * 0.25f - 64.0f;   // Vận tốc dọc trục y (Right), bù trừ vận tốc drone sẽ được xử lý ở luồng DataProcessingThread
-        obs.v_z = 0.0f;                         // MR72 không cung cấp thông tin vận tốc dọc trục z, giả định v_z=0
+        obs.v_x = vrelLongRaw * 0.25f - 128.0f; // Vận tốc dọc trục x (Forward)
+        obs.v_y = vrelLatRaw * 0.25f - 64.0f;   // Vận tốc dọc trục y (Right)
+        obs.v_z = 0.0f;                         // Giả định v_z=0
 
-        m_tempObstacles.push_back(obs);
-    }
-
-    // Nếu đã nhận đủ số lượng object_count báo từ gói list_status
-    if (m_tempObstacles.size() >= static_cast<size_t>(m_expectedObstacles) && m_expectedObstacles > 0)
-    {
-        m_obstacles = m_tempObstacles;
-        m_tempObstacles.clear();
-        return true; // Báo hiệu đã xong 1 chu kỳ quét
+        // Lưu trực tiếp vào m_obstacles (1 điểm duy nhất) và báo true để gửi đi luôn
+        m_obstacles.clear();
+        m_obstacles.push_back(obs);
+        
+        return true; 
     }
 
     return false;

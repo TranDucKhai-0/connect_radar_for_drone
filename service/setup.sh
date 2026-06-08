@@ -11,8 +11,9 @@ cd build
 if command -v cmake &> /dev/null; then
     cmake ..
     make >> build.log || true
+    cp connect_radar_for_drone ../radar_app || true
 else
-    g++ -std=c++17 -I../include ../src/*.cpp ../service/*.cpp ../main.cpp -o radar_app -lpthread >> build.log || true
+    g++ -std=c++17 -I../include ../src/*.cpp ../main.cpp -o ../radar_app -lpthread >> build.log || true
 fi
 
 cd ../service
@@ -21,7 +22,7 @@ echo "################################"
 
 echo "Set permission for RadarApp"
 # Cấp quyền thực thi
-chmod 337 ../build/radar_app || true
+chmod +x ../radar_app || true
 echo "################################"
 
 echo "Install the service"
@@ -37,11 +38,11 @@ fi
 mkdir -p /usr/local/etc/connect_radar_for_drone/blackbox
 mkdir -p /usr/local/etc/connect_radar_for_drone/service
 
-FILE=../build/radar_app
+FILE=../radar_app
 if [[ -f "$FILE" ]]; then
     rm -rf /usr/local/etc/connect_radar_for_drone/build/
     mkdir -p /usr/local/etc/connect_radar_for_drone/build/
-    cp -rf ../build/radar_app /usr/local/etc/connect_radar_for_drone/build/
+    cp -rf ../radar_app /usr/local/etc/connect_radar_for_drone/build/
 else
     echo "Failed to install RadarApp"
 fi

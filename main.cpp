@@ -17,6 +17,8 @@
 #include <cstring>
 #include <algorithm>
 
+#define CYCLE_TIME_MS 100 // Chu kỳ 100ms (10Hz) để gửi tới FC và GCS và ghi log
+
 // Tích hợp thư viện MAVLink C
 #include "../library/c_library_v2/ardupilotmega/mavlink.h"
 
@@ -212,21 +214,53 @@ void DataProcessingThread() {
 // ---------------------------------------------------------
 // THREAD 3: Ghi Log
 // ---------------------------------------------------------
-void WriteLogThread(const std::string& logDir) {
+void WriteLogThread(const std::string& logDir, int altMin) {
     std::string logFilePath = logDir + "/radar_log.csv";
     CsvLogger csvLogger(logFilePath);
-    if (!csvLogger.Open()) return;
+    
+    bool isLogging = false;
+    SharedFrameAbsolute latest_frame;
+    SharedFrameAbsolute temp_frame;
+    long long last_log_ms = 0;
 
-    SharedFrameAbsolute frame;
     while (g_isAppRunning) {
-        if (queue_log.TryPop(frame)) {
-            float alt = g_droneState.GetAltitude();
-            csvLogger.LogObstacles(GetCurrentTimestampMs(), *frame, alt);
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        // Rút cạn queue để luôn lấy frame mới nhất
+        while (queue_log.TryPop(temp_frame)) {
+            latest_frame = temp_frame;
         }
+
+        long long now = GetCurrentTimestampMs();
+        if (latest_frame && (now - last_log_ms >= CYCLE_TIME_MS)) { // Ghi log ở 10Hz (đồng bộ với FC, GCS)
+            last_log_ms = now;
+            float alt = g_droneState.GetAltitude();
+            
+            // Nếu drone đạt độ cao tối thiểu
+            if (alt * 100.0f >= altMin) {
+                // Lần đầu vượt ngưỡng -> Mở file ghi đè (khởi động phiên log mới)
+                if (!isLogging) {
+                    if (csvLogger.Open()) {
+                        isLogging = true;
+                        std::cout << "Drone took off. Started Blackbox recording.\n";
+                    }
+                }
+                
+                // Đang trong phiên bay -> Ghi dữ liệu
+                if (isLogging) {
+                    csvLogger.LogObstacles(GetCurrentTimestampMs(), *latest_frame, alt);
+                }
+            } else {
+                // Drone hạ dưới độ cao tối thiểu -> Ngừng ghi log và chốt file lại
+                if (isLogging) {
+                    csvLogger.Close();
+                    isLogging = false;
+                    std::cout << "Drone landed. Stopped Blackbox recording.\n";
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    csvLogger.Close();
+    
+    if (isLogging) csvLogger.Close();
     std::cout << "WriteLogThread Exited.\n";
 }
 
@@ -238,7 +272,8 @@ void SendDataToGcsThread(const std::string& ip, int port) {
     int sock = CreateUdpSocket(ip, port, addr);
     if (sock < 0) return;
 
-    SharedFrameAbsolute frame;
+    SharedFrameAbsolute latest_frame;
+    SharedFrameAbsolute temp_frame;
     long long last_send_ms = 0;
 
     // Force MAVLink 2 for messages > 255
@@ -246,15 +281,19 @@ void SendDataToGcsThread(const std::string& ip, int port) {
     status->flags &= ~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
 
     while (g_isAppRunning) {
-        if (queue_gcs.TryPop(frame)) {
-            long long now = GetCurrentTimestampMs();
-            if (now - last_send_ms < 100) continue; // 10Hz limit
+        // Rút cạn queue để đảm bảo luôn lấy được frame mới nhất
+        while (queue_gcs.TryPop(temp_frame)) {
+            latest_frame = temp_frame;
+        }
+
+        long long now = GetCurrentTimestampMs();
+        if (latest_frame && (now - last_send_ms >= CYCLE_TIME_MS)) { // 10Hz limit
             last_send_ms = now;
 
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
 
-            for (const auto& obs : *frame) {
+            for (const auto& obs : *latest_frame) {
                 if (obs.range < 2.0f || obs.range > 40.0f) continue;
                 
                 uint16_t tracking_id = obs.id;
@@ -271,9 +310,8 @@ void SendDataToGcsThread(const std::string& ip, int port) {
                 int len = mavlink_msg_to_send_buffer(buffer, &msg);
                 sendto(sock, buffer, len, 0, (struct sockaddr*)&addr, sizeof(addr));
             }
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     close(sock);
     std::cout << "SendDataToGcsThread Exited.\n";
@@ -282,37 +320,60 @@ void SendDataToGcsThread(const std::string& ip, int port) {
 // ---------------------------------------------------------
 // THREAD 5: Gửi FC (OBSTACLE_DISTANCE)
 // ---------------------------------------------------------
-void SendDataToFcThread(const std::string& ip, int port) {
+void SendDataToFcThread(const std::string& ip, int port, int altMin) {
     struct sockaddr_in addr;
     int sock = CreateUdpSocket(ip, port, addr);
     if (sock < 0) return;
 
-    SharedFrameAbsolute frame;
+    SharedFrameAbsolute latest_frame;
+    SharedFrameAbsolute temp_frame;
     long long last_send_ms = 0;
 
     while (g_isAppRunning) {
-        if (queue_fc.TryPop(frame)) {
-            long long now = GetCurrentTimestampMs();
-            if (now - last_send_ms < 100) continue; // 10Hz limit
+        // Rút cạn queue để lấy được frame mới nhất
+        while (queue_fc.TryPop(temp_frame)) {
+            latest_frame = temp_frame;
+        }
+
+        long long now = GetCurrentTimestampMs();
+        if (latest_frame && (now - last_send_ms >= CYCLE_TIME_MS)) { // Giới hạn tần số gửi 10Hz
             last_send_ms = now;
 
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
             
+            float alt = g_droneState.GetAltitude();
+            bool is_active = (alt * 100.0f >= altMin); // Kiểm tra xem drone đã đạt độ cao tối thiểu chưa
+            
+            // Khởi tạo mảng 72 phần tử đại diện cho 72 cung (mỗi cung 5 độ).
+            // Gán giá trị mặc định là UINT16_MAX (65535) -> Quy ước của MAVLink: Không có vật cản.
             uint16_t distances[72];
-            for (int i=0; i<72; i++) distances[i] = 4001; // Safe distance
+            for (int i=0; i<72; i++) distances[i] = UINT16_MAX;
 
-            for (const auto& obs : *frame) {
-                float dist_cm = obs.range * 100.0f;
-                if (dist_cm < 200.0f || dist_cm > 4000.0f) continue;
+            // Nếu drone đạt độ cao an toàn, bắt đầu phân tích điểm ảnh radar để chèn vào bản tin
+            if (is_active) {
+                for (const auto& obs : *latest_frame) {
+                    float dist_cm = obs.range * 100.0f; // MAVLink yêu cầu đơn vị cm
+                    if (dist_cm < 200.0f || dist_cm > 4000.0f) continue; // Bỏ qua nếu vật cản nằm ngoài dải 2m - 40m
 
-                float angle_deg = obs.angle * (180.0f / M_PI);
-                while (angle_deg < 0.0f) angle_deg += 360.0f;
-                while (angle_deg >= 360.0f) angle_deg -= 360.0f;
+                    // Đổi góc từ radian sang độ
+                    float angle_deg = obs.angle * (180.0f / M_PI);
+                    
+                    // Chuẩn hoá góc về miền [0, 360) độ
+                    // (Vì hàm atan2 có thể trả về góc âm từ -180 đến 0)
+                    while (angle_deg < 0.0f) angle_deg += 360.0f;
+                    while (angle_deg >= 360.0f) angle_deg -= 360.0f;
 
-                int idx = (int)(angle_deg / 5.0f + 0.5f) % 72;
-                if (distances[idx] == 4001 || dist_cm < distances[idx]) {
-                    distances[idx] = (uint16_t)dist_cm;
+                    // Bản tin OBSTACLE_DISTANCE chia không gian 360 độ thành 72 cung (cách nhau 5 độ).
+                    // Góc 0 là hướng thẳng mặt drone, tăng dần theo chiều kim đồng hồ.
+                    // Công thức sau tính index của mảng dựa trên góc: 
+                    int idx = (int)(angle_deg / 5.0f + 0.5f) % 72;
+                    
+                    // Nếu cung này chưa có điểm nào, hoặc điểm hiện tại gần hơn điểm trước đó:
+                    // Cập nhật khoảng cách vật cản nhỏ nhất vào cung này.
+                    if (distances[idx] == UINT16_MAX || dist_cm < distances[idx]) {
+                        distances[idx] = (uint16_t)dist_cm;
+                    }
                 }
             }
 
@@ -409,6 +470,8 @@ void PrintUsage() {
               << "  -a <alt>     Altitude Minimum\n"
               << "  -b <alt>     Altitude Distance\n"
               << "  -r <rate>    Parser rate\n"
+              << "  -I <id>      New Radar ID to set (0-7)\n"
+              << "  -O <id>      Old Radar ID to change from (0-7)\n"
               << "  -h           Show this help\n";
 }
 
@@ -424,8 +487,10 @@ int main(int argc, char **argv) {
     int altMin = 601;
     int altDis = 300;
     int parserRate = 50;
+    int oldId = -1;
+    int newId = -1;
 
-    while ((opt = getopt(argc, argv, "G:P:F:Q:L:d:a:b:r:h")) != -1) {
+    while ((opt = getopt(argc, argv, "G:P:F:Q:L:d:a:b:r:I:O:h")) != -1) {
         switch (opt) {
             case 'G': gcsIp = optarg; break;
             case 'P': gcsPort = std::atoi(optarg); break;
@@ -436,9 +501,42 @@ int main(int argc, char **argv) {
             case 'a': altMin = std::atoi(optarg); break;
             case 'b': altDis = std::atoi(optarg); break;
             case 'r': parserRate = std::atoi(optarg); break;
+            case 'I': newId = std::atoi(optarg); break;
+            case 'O': oldId = std::atoi(optarg); break;
             case 'h': PrintUsage(); return 0;
             default: PrintUsage(); return -1;
         }
+    }
+
+    // Logic: Nếu đang ở chế độ đổi ID (có cờ -I và -O), đổi ID xong thì thoát.
+    if (newId != -1 || oldId != -1) {
+        if (newId < 0 || newId > 7 || oldId < 0 || oldId > 7) {
+            std::cerr << "Radar ID must be between 0-7\n";
+            return -1;
+        }
+        std::cout << "ID Mode: Changing Radar ID from " << oldId << " to " << newId << "...\n";
+        CanBusManager canBus(canInterface);
+        if (!canBus.Connect()) {
+            std::cerr << "Failed to connect CAN bus for ID change.\n";
+            return -1;
+        }
+
+        struct can_frame frame;
+        memset(&frame, 0, sizeof(struct can_frame));
+        frame.can_id = 0x200 + oldId * 0x10;
+        frame.can_dlc = 8;
+        frame.data[0] = 0x02 | 0x80;
+        frame.data[4] = newId & 0xFF;
+        frame.data[5] = 0x80;
+
+        if (canBus.WriteCanFrame(frame)) {
+            std::cout << "ID change command sent successfully.\n";
+        } else {
+            std::cerr << "Failed to send ID change command.\n";
+        }
+
+        canBus.Disconnect();
+        return 0;
     }
 
     std::signal(SIGINT, SignalHandler);
@@ -452,9 +550,9 @@ int main(int argc, char **argv) {
     // Khởi tạo 6 Threads
     std::thread t1(ReadDataFromRadarThread, canInterface);
     std::thread t2(DataProcessingThread);
-    std::thread t3(WriteLogThread, logDir);
+    std::thread t3(WriteLogThread, logDir, altMin);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
-    std::thread t5(SendDataToFcThread, fcIp, fcPort);
+    std::thread t5(SendDataToFcThread, fcIp, fcPort, altMin);
     std::thread t6(FcListenerThread, localFcListenPort);
 
     // Join chờ ứng dụng kết thúc

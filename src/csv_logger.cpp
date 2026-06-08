@@ -8,17 +8,18 @@ CsvLogger::~CsvLogger() {
 }
 
 bool CsvLogger::Open() {
-    m_fileStream.open(m_filename, std::ios::out | std::ios::app);
+    if (m_fileStream.is_open()) {
+        m_fileStream.close();
+    }
+    // Mở ở chế độ ghi đè (trunc) để xóa dữ liệu cũ mỗi khi bắt đầu phiên mới
+    m_fileStream.open(m_filename, std::ios::out | std::ios::trunc);
     if (!m_fileStream.is_open()) {
         std::cerr << "CsvLogger: Could not open file " << m_filename << " for writing.\n";
         return false;
     }
     
-    // Nếu file trống, ghi header
-    m_fileStream.seekp(0, std::ios::end);
-    if (m_fileStream.tellp() == 0) {
-        m_fileStream << "TimestampMs,ID,X,Y,Z,AbsX,AbsY,AbsZ,Range,Angle,Vx,Vy,Vz,VabsX,VabsY,VabsZ,DroneAlt\n";
-    }
+    // Ghi header mỗi khi khởi tạo 
+    m_fileStream << "TimestampMs,ID_obj,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
     
     return true;
 }
