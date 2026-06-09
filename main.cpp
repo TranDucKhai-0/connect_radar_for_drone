@@ -25,14 +25,14 @@
 std::atomic<bool> g_isAppRunning{true};
 DroneState g_droneState;
 
-using FrameRelative = std::vector<obstacle_relative_t>;
-using FrameAbsolute = std::vector<obstacle_absolute_t>;
-using SharedFrameAbsolute = std::shared_ptr<FrameAbsolute>;
+using frameRelative_t = std::vector<obstacleRelative_t>;
+using frameAbsolute_t = std::vector<obstacleAbsolute_t>;
+using sharedFrameAbsolute_t = std::shared_ptr<frameAbsolute_t>;
 
-ThreadSafeQueue<std::pair<int, FrameRelative>> queue_relative;
-ThreadSafeQueue<SharedFrameAbsolute> queue_log;
-ThreadSafeQueue<SharedFrameAbsolute> queue_gcs;
-ThreadSafeQueue<SharedFrameAbsolute> queue_fc;
+ThreadSafeQueue<std::pair<int, frameRelative_t>> g_queueRelative;
+ThreadSafeQueue<sharedFrameAbsolute_t> g_queueLog;
+ThreadSafeQueue<sharedFrameAbsolute_t> g_queueGcs;
+ThreadSafeQueue<sharedFrameAbsolute_t> g_queueFc;
 
 void SignalHandler(int signum) {
     std::cout << "\nInterrupt signal (" << signum << ") received. Shutting down...\n";
@@ -76,7 +76,7 @@ void ReadDataFromRadarThread(const std::string& canIface) {
             // Đẩy dữ liệu vào Parse của cả 4 radar
             for (int i = 0; i < 4; i++) {
                 if (radars[i].ParseCanFrame(frame, 0.0f, 0.0f)) {
-                    queue_relative.Push({i + 1, radars[i].GetObstaclesRelative()});
+                    g_queueRelative.Push({i + 1, radars[i].GetObstaclesRelative()});
                 }
             }
         } else {
@@ -87,126 +87,128 @@ void ReadDataFromRadarThread(const std::string& canIface) {
     std::cout << "ReadDataFromRadarThread Exited.\n";
 }
 
-struct TrackedObject {
-    obstacle_absolute_t data;
-    long long last_seen_ms;
+struct trackedObject_t {
+    obstacleAbsolute_t data;
+    long long lastSeenMs;
 };
 
 // ---------------------------------------------------------
 // THREAD 2: Xử lý Data (Relative + FC State -> Absolute)
 // ---------------------------------------------------------
 void DataProcessingThread() {
-    std::pair<int, FrameRelative> framePair;
-    std::vector<TrackedObject> global_tracked_objects;
+    std::pair<int, frameRelative_t> framePair;
+    std::vector<trackedObject_t> trackedObjects;
+
+    constexpr float timeDelayThreadSleepSeconds = CYCLE_TIME_MS / 1000.0f; // Bù trừ trễ thời gian thread ngủ để tăng độ chính xác khi tính toán bù trừ (s)
 
     while (g_isAppRunning) {
-        if (queue_relative.TryPop(framePair)) {
+        if (g_queueRelative.TryPop(framePair)) {
             long long now = GetCurrentTimestampMs();
-            int radar_id = framePair.first;
-            FrameRelative& relativeFrame = framePair.second;
+            int radarId = framePair.first;
+            frameRelative_t& relativeFrame = framePair.second;
 
             float vx, vy, alt;
             g_droneState.GetState(vx, vy, alt);
 
-            std::vector<obstacle_absolute_t> new_abs_points;
-            new_abs_points.reserve(relativeFrame.size());
+            std::vector<obstacleAbsolute_t> newAbsPoints;
+            newAbsPoints.reserve(relativeFrame.size());
 
             // 1. Convert to absolute
             for (const auto& rel : relativeFrame) {
-                obstacle_absolute_t abs_obs;
+                obstacleAbsolute_t absObs;
                 
-                float base_x = 0, base_y = 0;
-                float base_vx = 0, base_vy = 0;
+                float baseX = 0, baseY = 0;
+                float baseVx = 0, baseVy = 0;
 
                 // Xoay toạ độ và vận tốc relative về hệ toạ độ gốc (Front=X+, Right=Y+)
-                switch (radar_id) {
+                switch (radarId) {
                     case 1: // Front
-                        base_x = rel.x;       base_y = rel.y;
-                        base_vx = rel.v_x;    base_vy = rel.v_y;
+                        baseX = rel.x;       baseY = rel.y;
+                        baseVx = rel.vx;    baseVy = rel.vy;
                         break;
                     case 2: // Right
-                        base_x = -rel.y;      base_y = rel.x;
-                        base_vx = -rel.v_y;   base_vy = rel.v_x;
+                        baseX = -rel.y;      baseY = rel.x;
+                        baseVx = -rel.vy;   baseVy = rel.vx;
                         break;
                     case 3: // Back
-                        base_x = -rel.x;      base_y = -rel.y;
-                        base_vx = -rel.v_x;   base_vy = -rel.v_y;
+                        baseX = -rel.x;      baseY = -rel.y;
+                        baseVx = -rel.vx;   baseVy = -rel.vy;
                         break;
                     case 4: // Left
-                        base_x = rel.y;       base_y = -rel.x;
-                        base_vx = rel.v_y;    base_vy = -rel.v_x;
+                        baseX = rel.y;       baseY = -rel.x;
+                        baseVx = rel.vy;    baseVy = -rel.vx;
                         break;
                     default:
-                        base_x = rel.x;       base_y = rel.y;
-                        base_vx = rel.v_x;    base_vy = rel.v_y;
+                        baseX = rel.x;       baseY = rel.y;
+                        baseVx = rel.vx;    baseVy = rel.vy;
                         break;
                 }
 
                 // Bù trừ vận tốc (Vận tốc gốc so với mặt đất)
-                abs_obs.v_x = base_vx + vx;
-                abs_obs.v_y = base_vy + vy;
-                abs_obs.v_z = rel.v_z;
+                absObs.vx = baseVx + vx;
+                absObs.vy = baseVy + vy;
+                absObs.vz = rel.vz;
 
-                // Bù trừ trễ 100ms
-                abs_obs.x = base_x + abs_obs.v_x * 0.1f;
-                abs_obs.y = base_y + abs_obs.v_y * 0.1f;
-                abs_obs.z = rel.z;
+                // Bù trừ trễ thời gian thread ngủ 
+                absObs.x = baseX + absObs.vx * timeDelayThreadSleepSeconds;
+                absObs.y = baseY + absObs.vy * timeDelayThreadSleepSeconds;
+                absObs.z = rel.z;
 
                 // Chuyển sang Polar
-                abs_obs.angle = std::atan2(abs_obs.y, abs_obs.x);
-                abs_obs.range = std::sqrt(abs_obs.x * abs_obs.x + abs_obs.y * abs_obs.y);
+                absObs.angle = std::atan2(absObs.y, absObs.x);
+                absObs.range = std::sqrt(absObs.x * absObs.x + absObs.y * absObs.y);
 
                 // lọc bỏ data rác
-                if (abs_obs.range < 2.0f || abs_obs.range > 40.0f) continue;
+                if (absObs.range < 2.0f || absObs.range > 40.0f) continue;
 
-                new_abs_points.push_back(abs_obs);
+                newAbsPoints.push_back(absObs);
             }
 
             // Data Association (Merge objects < 0.2m)
-            for (auto& new_point : new_abs_points) {
-                float min_dist = 0.2f; // Ngưỡng 0.2m
-                TrackedObject* best_match = nullptr;
+            for (auto& new_point : newAbsPoints) {
+                float minDist = 0.2f; // Ngưỡng 0.2m
+                trackedObject_t* pBestMatch = nullptr;
                 
-                for (auto& track : global_tracked_objects) {
+                for (auto& track : trackedObjects) {
                     float dx = track.data.x - new_point.x;
                     float dy = track.data.y - new_point.y;
                     float dz = track.data.z - new_point.z;
                     float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
                     
-                    if (dist < min_dist) {
-                        min_dist = dist;
-                        best_match = &track;
+                    if (dist < minDist) {
+                        minDist = dist;
+                        pBestMatch = &track;
                     }
                 }
                 
-                if (best_match) {
+                if (pBestMatch) {
                     // Update existing object: Gán lại ID của object đã tồn tại cho object mới (gộp ID)
-                    new_point.id = best_match->data.id;
-                    best_match->data = new_point;
-                    best_match->last_seen_ms = now;
+                    new_point.id = pBestMatch->data.id;
+                    pBestMatch->data = new_point;
+                    pBestMatch->lastSeenMs = now;
                 } else {
                     // Create new tracked object: Giữ nguyên ID nguyên bản từ radar
-                    global_tracked_objects.push_back({new_point, now});
+                    trackedObjects.push_back({new_point, now});
                 }
             }
 
             // Remove old objects (Không xuất hiện trong 500ms)
-            global_tracked_objects.erase(
-                std::remove_if(global_tracked_objects.begin(), global_tracked_objects.end(),
-                               [now](const TrackedObject& t) { return (now - t.last_seen_ms) > 500; }),
-                global_tracked_objects.end()
+            trackedObjects.erase(
+                std::remove_if(trackedObjects.begin(), trackedObjects.end(),
+                               [now](const trackedObject_t& t) { return (now - t.lastSeenMs) > 500; }),
+                trackedObjects.end()
             );
 
             // Phân phối Frame tổng hợp cho Output
-            auto absFrame = std::make_shared<FrameAbsolute>();
-            absFrame->reserve(global_tracked_objects.size());
-            for (const auto& track : global_tracked_objects) {
-                absFrame->push_back(track.data);
+            auto pAbsFrame = std::make_shared<frameAbsolute_t>();
+            pAbsFrame->reserve(trackedObjects.size());
+            for (const auto& track : trackedObjects) {
+                pAbsFrame->push_back(track.data);
             }
 
-            queue_log.Push(absFrame);
-            queue_gcs.Push(absFrame);
-            queue_fc.Push(absFrame);
+            g_queueLog.Push(pAbsFrame);
+            g_queueGcs.Push(pAbsFrame);
+            g_queueFc.Push(pAbsFrame);
         } else {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -222,8 +224,8 @@ void WriteLogThread(const std::string& logDir, int altMin, bool forceLog) {
     CsvLogger csvLogger(logFilePath);
     
     bool isLogging = false;
-    SharedFrameAbsolute latest_frame;
-    SharedFrameAbsolute temp_frame;
+    sharedFrameAbsolute_t pLatestFrame;
+    sharedFrameAbsolute_t pTempFrame;
 
     // Nếu chạy chế độ mock/forceLog, bật ghi log ngay từ đầu
     if (forceLog) {
@@ -237,11 +239,11 @@ void WriteLogThread(const std::string& logDir, int altMin, bool forceLog) {
 
     while (g_isAppRunning) {
         // Rút cạn queue để luôn lấy frame mới nhất
-        while (queue_log.TryPop(temp_frame)) {
-            latest_frame = temp_frame;
+        while (g_queueLog.TryPop(pTempFrame)) {
+            pLatestFrame = pTempFrame;
         }
 
-        if (latest_frame) {
+        if (pLatestFrame) {
             float alt = g_droneState.GetAltitude();
             
             // Nếu không dùng forceLog, ghi log phụ thuộc vào độ cao
@@ -264,10 +266,11 @@ void WriteLogThread(const std::string& logDir, int altMin, bool forceLog) {
             
             // Đang trong phiên bay (hoặc do forceLog) -> Ghi dữ liệu
             if (isLogging) {
-                csvLogger.LogObstacles(GetCurrentTimestampMs(), *latest_frame, alt);
+                csvLogger.LogObstacles(GetCurrentTimestampMs(), *pLatestFrame, alt);
             }
         }
         
+        // Cho thread ngử để tối ưu năng lượng
         next_wake_time += std::chrono::milliseconds(CYCLE_TIME_MS);
         auto current_time = std::chrono::steady_clock::now();
         if (next_wake_time < current_time) next_wake_time = current_time;
@@ -286,8 +289,8 @@ void SendDataToGcsThread(const std::string& ip, int port) {
     int sock = CreateUdpSocket(ip, port, addr);
     if (sock < 0) return;
 
-    SharedFrameAbsolute latest_frame;
-    SharedFrameAbsolute temp_frame;
+    sharedFrameAbsolute_t pLatestFrame;
+    sharedFrameAbsolute_t pTempFrame;
 
     // Force MAVLink 2 for messages > 255
     mavlink_status_t *status = mavlink_get_channel_status(MAVLINK_COMM_0);
@@ -297,16 +300,16 @@ void SendDataToGcsThread(const std::string& ip, int port) {
 
     while (g_isAppRunning) {
         // Rút cạn queue để đảm bảo luôn lấy được frame mới nhất
-        while (queue_gcs.TryPop(temp_frame)) {
-            latest_frame = temp_frame;
+        while (g_queueGcs.TryPop(pTempFrame)) {
+            pLatestFrame = pTempFrame;
         }
 
-        if (latest_frame) {
+        if (pLatestFrame) {
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
             long long timestamp_ms = GetCurrentTimestampMs();
 
-            for (const auto& obs : *latest_frame) {
+            for (const auto& obs : *pLatestFrame) {
                 uint16_t tracking_id = obs.id;
                 
                 mavlink_msg_obstacle_distance_3d_pack(
@@ -323,6 +326,7 @@ void SendDataToGcsThread(const std::string& ip, int port) {
             }
         }
         
+        // Cho thread ngử để tối ưu năng lượng
         next_wake_time += std::chrono::milliseconds(CYCLE_TIME_MS);
         auto current_time = std::chrono::steady_clock::now();
         if (next_wake_time < current_time) next_wake_time = current_time;
@@ -340,18 +344,18 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
     int sock = CreateUdpSocket(ip, port, addr);
     if (sock < 0) return;
 
-    SharedFrameAbsolute latest_frame;
-    SharedFrameAbsolute temp_frame;
+    sharedFrameAbsolute_t pLatestFrame;
+    sharedFrameAbsolute_t pTempFrame;
 
     auto next_wake_time = std::chrono::steady_clock::now();
 
     while (g_isAppRunning) {
         // Rút cạn queue để lấy được frame mới nhất
-        while (queue_fc.TryPop(temp_frame)) {
-            latest_frame = temp_frame;
+        while (g_queueFc.TryPop(pTempFrame)) {
+            pLatestFrame = pTempFrame;
         }
 
-        if (latest_frame) {
+        if (pLatestFrame) {
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
             
@@ -361,11 +365,11 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             // Khởi tạo mảng 72 phần tử đại diện cho 72 cung (mỗi cung 5 độ).
             // Gán giá trị mặc định là UINT16_MAX (65535) -> Quy ước của MAVLink: Không có vật cản.
             uint16_t distances[72];
-            for (int i=0; i<72; i++) distances[i] = UINT16_MAX;
+            for (uint8_t i=0; i<72; i++) distances[i] = UINT16_MAX;
 
             // Nếu drone đạt độ cao an toàn, bắt đầu phân tích điểm ảnh radar để chèn vào bản tin
             if (is_active) {
-                for (const auto& obs : *latest_frame) {
+                for (const auto& obs : *pLatestFrame) {
                     float dist_cm = obs.range * 100.0f; // MAVLink yêu cầu đơn vị cm
                     
                     // Đổi góc từ radian sang độ
@@ -379,7 +383,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
                     // Bản tin OBSTACLE_DISTANCE chia không gian 360 độ thành 72 cung (cách nhau 5 độ).
                     // Góc 0 là hướng thẳng mặt drone, tăng dần theo chiều kim đồng hồ.
                     // Công thức sau tính index của mảng dựa trên góc: 
-                    int idx = (int)(angle_deg / 5.0f + 0.5f) % 72;
+                    uint8_t idx = (uint16_t)(angle_deg / 5.0f + 0.5f) % 72;
                     
                     // Nếu cung này chưa có điểm nào, hoặc điểm hiện tại gần hơn điểm trước đó:
                     // Cập nhật khoảng cách vật cản nhỏ nhất vào cung này.
@@ -405,6 +409,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             sendto(sock, buffer, len, 0, (struct sockaddr*)&addr, sizeof(addr));
         }
 
+        // Cho thread ngử để tối ưu năng lượng
         next_wake_time += std::chrono::milliseconds(CYCLE_TIME_MS);
         auto current_time = std::chrono::steady_clock::now();
         if (next_wake_time < current_time) next_wake_time = current_time;

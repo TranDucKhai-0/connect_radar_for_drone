@@ -13,7 +13,7 @@ public:
 
     bool Open();
     void Close();
-    void LogObstacles(long long timestampMs, const std::vector<obstacle_absolute_t>& obstacles, float droneAlt);
+    void LogObstacles(long long timestampMs, const std::vector<obstacleAbsolute_t>& obstacles, float droneAlt);
 
 private:
     std::string m_filename;

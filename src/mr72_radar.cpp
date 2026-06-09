@@ -31,7 +31,7 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         // Chỉ lấy vật thể đã được xác nhận (Measured == 0x02)
         if (sectorNumber != 0x02) return false;
 
-        obstacle_relative_t obs;
+        obstacleRelative_t obs;
         obs.id = frame.data[0]; // Giữ nguyên object ID gốc do radar gán, GCS dùng để phân biệt các điểm
 
         uint16_t distLongRaw = (frame.data[1] << 5) | (frame.data[2] >> 3);
@@ -42,9 +42,9 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         obs.x   = distLongRaw * 0.2f - 500.0f;    // X = Forward (m)
         obs.y   = distLatRaw  * 0.2f - 204.6f;    // Y = Right   (m)
         obs.z   = 0.0f;                            // MR72 không đo độ cao
-        obs.v_x = vrelLongRaw * 0.25f - 128.0f;   // Vận tốc dọc trục X (m/s)
-        obs.v_y = vrelLatRaw  * 0.25f - 64.0f;    // Vận tốc dọc trục Y (m/s)
-        obs.v_z = 0.0f;
+        obs.vx = vrelLongRaw * 0.25f - 128.0f;   // Vận tốc dọc trục X (m/s)
+        obs.vy = vrelLatRaw  * 0.25f - 64.0f;    // Vận tốc dọc trục Y (m/s)
+        obs.vz = 0.0f;
 
         m_obstacles.clear();
         m_obstacles.push_back(obs);
@@ -54,7 +54,7 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
     return false;
 }
 
-std::vector<obstacle_relative_t> MR72Radar::GetObstaclesRelative() const
+std::vector<obstacleRelative_t> MR72Radar::GetObstaclesRelative() const
 {
     return m_obstacles;
 }

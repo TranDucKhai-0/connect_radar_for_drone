@@ -19,7 +19,7 @@ public:
     // ParseCanFrame giờ đây không nhận vận tốc drone nữa vì nó tính relative thôi
     bool ParseCanFrame(const struct can_frame &frame, float droneVForward, float droneVRight) override;
     
-    std::vector<obstacle_relative_t> GetObstaclesRelative() const;
+    std::vector<obstacleRelative_t> GetObstaclesRelative() const;
 
     int GetObstacleCount() const override;
 
@@ -27,8 +27,8 @@ private:
     int m_id;
     float m_mountingYaw;
     int m_expectedObstacles;
-    std::vector<obstacle_relative_t> m_tempObstacles;
-    std::vector<obstacle_relative_t> m_obstacles;
+    std::vector<obstacleRelative_t> m_tempObstacles;
+    std::vector<obstacleRelative_t> m_obstacles;
 };
 
 #endif // MR72RADAR_HPP

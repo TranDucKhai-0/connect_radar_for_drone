@@ -55,7 +55,7 @@ void CsvLogger::Close()
     }
 }
 
-void CsvLogger::LogObstacles(long long timestampMs, const std::vector<obstacle_absolute_t> &obstacles, float droneAlt)
+void CsvLogger::LogObstacles(long long timestampMs, const std::vector<obstacleAbsolute_t>& obstacles, float droneAlt)
 {
     if (!m_fileStream.is_open())
         return;
@@ -72,9 +72,9 @@ void CsvLogger::LogObstacles(long long timestampMs, const std::vector<obstacle_a
                      << obs.z << ","
                      << obs.range << ","
                      << obs.angle << ","
-                     << obs.v_x << ","
-                     << obs.v_y << ","
-                     << obs.v_z << ","
+                     << obs.vx << ","
+                     << obs.vy << ","
+                     << obs.vz << ","
                      << droneAlt << "\n";
     }
 
