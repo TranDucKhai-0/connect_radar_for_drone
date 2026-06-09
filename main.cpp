@@ -156,10 +156,13 @@ void DataProcessingThread() {
                 abs_obs.angle = std::atan2(abs_obs.y, abs_obs.x);
                 abs_obs.range = std::sqrt(abs_obs.x * abs_obs.x + abs_obs.y * abs_obs.y);
 
+                // lọc bỏ data rác
+                if (abs_obs.range < 2.0f || abs_obs.range > 40.0f) continue;
+
                 new_abs_points.push_back(abs_obs);
             }
 
-            // 2. Data Association (Merge objects < 0.2m)
+            // Data Association (Merge objects < 0.2m)
             for (auto& new_point : new_abs_points) {
                 float min_dist = 0.2f; // Ngưỡng 0.2m
                 TrackedObject* best_match = nullptr;
@@ -187,14 +190,14 @@ void DataProcessingThread() {
                 }
             }
 
-            // 3. Remove old objects (Không xuất hiện trong 500ms)
+            // Remove old objects (Không xuất hiện trong 500ms)
             global_tracked_objects.erase(
                 std::remove_if(global_tracked_objects.begin(), global_tracked_objects.end(),
                                [now](const TrackedObject& t) { return (now - t.last_seen_ms) > 500; }),
                 global_tracked_objects.end()
             );
 
-            // 4. Phân phối Frame tổng hợp cho Output
+            // Phân phối Frame tổng hợp cho Output
             auto absFrame = std::make_shared<FrameAbsolute>();
             absFrame->reserve(global_tracked_objects.size());
             for (const auto& track : global_tracked_objects) {
@@ -214,14 +217,23 @@ void DataProcessingThread() {
 // ---------------------------------------------------------
 // THREAD 3: Ghi Log
 // ---------------------------------------------------------
-void WriteLogThread(const std::string& logDir, int altMin) {
+void WriteLogThread(const std::string& logDir, int altMin, bool forceLog) {
     std::string logFilePath = logDir + "/radar_log.csv";
     CsvLogger csvLogger(logFilePath);
     
     bool isLogging = false;
     SharedFrameAbsolute latest_frame;
     SharedFrameAbsolute temp_frame;
-    long long last_log_ms = 0;
+
+    // Nếu chạy chế độ mock/forceLog, bật ghi log ngay từ đầu
+    if (forceLog) {
+        if (csvLogger.Open()) {
+            isLogging = true;
+            std::cout << "Force Log mode enabled. Started Blackbox recording immediately.\n";
+        }
+    }
+
+    auto next_wake_time = std::chrono::steady_clock::now();
 
     while (g_isAppRunning) {
         // Rút cạn queue để luôn lấy frame mới nhất
@@ -229,35 +241,37 @@ void WriteLogThread(const std::string& logDir, int altMin) {
             latest_frame = temp_frame;
         }
 
-        long long now = GetCurrentTimestampMs();
-        if (latest_frame && (now - last_log_ms >= CYCLE_TIME_MS)) { // Ghi log ở 10Hz (đồng bộ với FC, GCS)
-            last_log_ms = now;
+        if (latest_frame) {
             float alt = g_droneState.GetAltitude();
             
-            // Nếu drone đạt độ cao tối thiểu
-            if (alt * 100.0f >= altMin) {
-                // Lần đầu vượt ngưỡng -> Mở file ghi đè (khởi động phiên log mới)
-                if (!isLogging) {
-                    if (csvLogger.Open()) {
-                        isLogging = true;
-                        std::cout << "Drone took off. Started Blackbox recording.\n";
+            // Nếu không dùng forceLog, ghi log phụ thuộc vào độ cao
+            if (!forceLog) {
+                if (alt * 100.0f >= altMin) {
+                    if (!isLogging) {
+                        if (csvLogger.Open()) {
+                            isLogging = true;
+                            std::cout << "Drone took off. Started Blackbox recording.\n";
+                        }
+                    }
+                } else {
+                    if (isLogging) {
+                        csvLogger.Close();
+                        isLogging = false;
+                        std::cout << "Drone landed. Stopped Blackbox recording.\n";
                     }
                 }
-                
-                // Đang trong phiên bay -> Ghi dữ liệu
-                if (isLogging) {
-                    csvLogger.LogObstacles(GetCurrentTimestampMs(), *latest_frame, alt);
-                }
-            } else {
-                // Drone hạ dưới độ cao tối thiểu -> Ngừng ghi log và chốt file lại
-                if (isLogging) {
-                    csvLogger.Close();
-                    isLogging = false;
-                    std::cout << "Drone landed. Stopped Blackbox recording.\n";
-                }
+            }
+            
+            // Đang trong phiên bay (hoặc do forceLog) -> Ghi dữ liệu
+            if (isLogging) {
+                csvLogger.LogObstacles(GetCurrentTimestampMs(), *latest_frame, alt);
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        
+        next_wake_time += std::chrono::milliseconds(CYCLE_TIME_MS);
+        auto current_time = std::chrono::steady_clock::now();
+        if (next_wake_time < current_time) next_wake_time = current_time;
+        std::this_thread::sleep_until(next_wake_time);
     }
     
     if (isLogging) csvLogger.Close();
@@ -274,11 +288,12 @@ void SendDataToGcsThread(const std::string& ip, int port) {
 
     SharedFrameAbsolute latest_frame;
     SharedFrameAbsolute temp_frame;
-    long long last_send_ms = 0;
 
     // Force MAVLink 2 for messages > 255
     mavlink_status_t *status = mavlink_get_channel_status(MAVLINK_COMM_0);
     status->flags &= ~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
+
+    auto next_wake_time = std::chrono::steady_clock::now();
 
     while (g_isAppRunning) {
         // Rút cạn queue để đảm bảo luôn lấy được frame mới nhất
@@ -286,21 +301,17 @@ void SendDataToGcsThread(const std::string& ip, int port) {
             latest_frame = temp_frame;
         }
 
-        long long now = GetCurrentTimestampMs();
-        if (latest_frame && (now - last_send_ms >= CYCLE_TIME_MS)) { // 10Hz limit
-            last_send_ms = now;
-
+        if (latest_frame) {
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
+            long long timestamp_ms = GetCurrentTimestampMs();
 
             for (const auto& obs : *latest_frame) {
-                if (obs.range < 2.0f || obs.range > 40.0f) continue;
-                
                 uint16_t tracking_id = obs.id;
                 
                 mavlink_msg_obstacle_distance_3d_pack(
                     1, 195, &msg,
-                    now,
+                    timestamp_ms,
                     MAV_DISTANCE_SENSOR_RADAR,
                     MAV_FRAME_BODY_FRD,
                     tracking_id,
@@ -311,7 +322,11 @@ void SendDataToGcsThread(const std::string& ip, int port) {
                 sendto(sock, buffer, len, 0, (struct sockaddr*)&addr, sizeof(addr));
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        
+        next_wake_time += std::chrono::milliseconds(CYCLE_TIME_MS);
+        auto current_time = std::chrono::steady_clock::now();
+        if (next_wake_time < current_time) next_wake_time = current_time;
+        std::this_thread::sleep_until(next_wake_time);
     }
     close(sock);
     std::cout << "SendDataToGcsThread Exited.\n";
@@ -327,7 +342,8 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
 
     SharedFrameAbsolute latest_frame;
     SharedFrameAbsolute temp_frame;
-    long long last_send_ms = 0;
+
+    auto next_wake_time = std::chrono::steady_clock::now();
 
     while (g_isAppRunning) {
         // Rút cạn queue để lấy được frame mới nhất
@@ -335,10 +351,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             latest_frame = temp_frame;
         }
 
-        long long now = GetCurrentTimestampMs();
-        if (latest_frame && (now - last_send_ms >= CYCLE_TIME_MS)) { // Giới hạn tần số gửi 10Hz
-            last_send_ms = now;
-
+        if (latest_frame) {
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
             
@@ -354,8 +367,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             if (is_active) {
                 for (const auto& obs : *latest_frame) {
                     float dist_cm = obs.range * 100.0f; // MAVLink yêu cầu đơn vị cm
-                    if (dist_cm < 200.0f || dist_cm > 4000.0f) continue; // Bỏ qua nếu vật cản nằm ngoài dải 2m - 40m
-
+                    
                     // Đổi góc từ radian sang độ
                     float angle_deg = obs.angle * (180.0f / M_PI);
                     
@@ -379,7 +391,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
 
             mavlink_msg_obstacle_distance_pack(
                 1, 195, &msg,
-                now, 
+                GetCurrentTimestampMs(), 
                 MAV_DISTANCE_SENSOR_RADAR, 
                 distances,
                 5, // angular_width (5 độ mỗi sector)
@@ -391,9 +403,12 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             
             int len = mavlink_msg_to_send_buffer(buffer, &msg);
             sendto(sock, buffer, len, 0, (struct sockaddr*)&addr, sizeof(addr));
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
+
+        next_wake_time += std::chrono::milliseconds(CYCLE_TIME_MS);
+        auto current_time = std::chrono::steady_clock::now();
+        if (next_wake_time < current_time) next_wake_time = current_time;
+        std::this_thread::sleep_until(next_wake_time);
     }
     close(sock);
     std::cout << "SendDataToFcThread Exited.\n";
@@ -472,6 +487,7 @@ void PrintUsage() {
               << "  -r <rate>    Parser rate\n"
               << "  -I <id>      New Radar ID to set (0-7)\n"
               << "  -O <id>      Old Radar ID to change from (0-7)\n"
+              << "  -f           Force logging regardless of altitude\n"
               << "  -h           Show this help\n";
 }
 
@@ -483,14 +499,15 @@ int main(int argc, char **argv) {
     int fcPort = 14550;
     int localFcListenPort = 14551; // Port nghe telemetry từ FC
     std::string canInterface = "can0"; 
-    std::string logDir = "."; // Mặc định lưu log ở thư mục hiện tại
+    std::string logDir = "/usr/local/etc/connect_radar_for_drone/blackbox"; // Thư mục lưu log mặc định
     int altMin = 601;
     int altDis = 300;
     int parserRate = 50;
     int oldId = -1;
     int newId = -1;
+    bool forceLog = false;
 
-    while ((opt = getopt(argc, argv, "G:P:F:Q:L:d:a:b:r:I:O:h")) != -1) {
+    while ((opt = getopt(argc, argv, "G:P:F:Q:L:d:a:b:r:I:O:fh")) != -1) {
         switch (opt) {
             case 'G': gcsIp = optarg; break;
             case 'P': gcsPort = std::atoi(optarg); break;
@@ -503,6 +520,7 @@ int main(int argc, char **argv) {
             case 'r': parserRate = std::atoi(optarg); break;
             case 'I': newId = std::atoi(optarg); break;
             case 'O': oldId = std::atoi(optarg); break;
+            case 'f': forceLog = true; break;
             case 'h': PrintUsage(); return 0;
             default: PrintUsage(); return -1;
         }
@@ -550,7 +568,7 @@ int main(int argc, char **argv) {
     // Khởi tạo 6 Threads
     std::thread t1(ReadDataFromRadarThread, canInterface);
     std::thread t2(DataProcessingThread);
-    std::thread t3(WriteLogThread, logDir, altMin);
+    std::thread t3(WriteLogThread, logDir, altMin, forceLog);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
     std::thread t5(SendDataToFcThread, fcIp, fcPort, altMin);
     std::thread t6(FcListenerThread, localFcListenPort);

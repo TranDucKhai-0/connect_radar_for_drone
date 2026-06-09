@@ -1,0 +1,17 @@
+sudo systemctl stop radar_setup.service can_setup.service
+sudo systemctl disable radar_setup.service can_setup.service
+sudo rm /etc/systemd/system/radar_setup.service
+sudo rm /etc/systemd/system/can_setup.service
+sudo systemctl daemon-reload
+sudo rm -rf ~/Downloads/connect_radar_for_drone/
+
+! Gửi coe mới vào scp -r /home/khai/Downloads/connect_radar_for_drone rtr@192.168.55.1:~/Downloads/
+
+scp -r /home/khai/Downloads/connect_radar_for_drone rtr@192.168.0.215:~/Downloads/
+
+cd ~/Downloads/connect_radar_for_drone/service/
+chmod +x setup.sh
+sudo ./setup.sh
+
+! check
+sudo systemctl status radar_setup.service
