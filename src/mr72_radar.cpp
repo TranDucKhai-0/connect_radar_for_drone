@@ -26,9 +26,11 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
     }
     else if (frame.can_id == (MR72_OBJECT_GENERAL_INFO + m_id * 0x10))
     {
-        uint8_t sectorNumber = (frame.data[6] >> 3) & 0x3;
+        uint8_t sectorNumber = (frame.data[6] >> 3) & 0x03;
 
-        // Chỉ lấy vật thể đã được xác nhận (Measured == 0x02)
+        // Theo protocol MR72, (data[6] >> 3) & 0x3 là Sector Number.
+        // Sector 1 là khu vực chính giữa, Sector 2 và 3 là hai bên.
+        // Chỉ lấy vật thể ở Sector 1 (chính giữa)
         if (sectorNumber != 0x02) return false;
 
         obstacleRelative_t obs;
@@ -37,7 +39,7 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         uint16_t distLongRaw = (frame.data[1] << 5) | (frame.data[2] >> 3);
         uint16_t distLatRaw  = ((frame.data[2] & 0x7) << 8) | frame.data[3];
         uint16_t vrelLongRaw = (frame.data[4] << 2) | ((frame.data[5] >> 6) & 0x3);
-        uint16_t vrelLatRaw  = (frame.data[5] << 3) | ((frame.data[6] >> 5) & 0x7);
+        uint16_t vrelLatRaw  = ((frame.data[5] & 0x3F) << 3) | ((frame.data[6] >> 5) & 0x7);
 
         obs.x   = distLongRaw * 0.2f - 500.0f;    // X = Forward (m)
         obs.y   = distLatRaw  * 0.2f - 204.6f;    // Y = Right   (m)

@@ -6,7 +6,7 @@ Requires=can_setup.service
 [Service]
 User=root
 WorkingDirectory=/usr/local/etc/connect_radar_for_drone
-ExecStart=/usr/local/etc/connect_radar_for_drone/build/radar_app -r 50 -a 601 -b 300 -G 192.168.0.29 -P 14550 -d /usr/local/etc/connect_radar_for_drone/blackbox
+ExecStart=/usr/local/etc/connect_radar_for_drone/build/radar_app -r 50 -a 1001 -b 600 -G 192.168.0.29 -P 14550 -d /usr/local/etc/connect_radar_for_drone/blackbox
 Restart=always 
 RestartSec=3
 

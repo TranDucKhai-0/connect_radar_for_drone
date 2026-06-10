@@ -219,7 +219,7 @@ void DataProcessingThread() {
 // ---------------------------------------------------------
 // THREAD 3: Ghi Log
 // ---------------------------------------------------------
-void WriteLogThread(const std::string& logDir, int altMin, bool forceLog) {
+void WriteLogThread(const std::string& logDir, int altMin, int altDis, bool forceLog) {
     std::string logFilePath = logDir + "/radar_log.csv";
     CsvLogger csvLogger(logFilePath);
     
@@ -246,27 +246,27 @@ void WriteLogThread(const std::string& logDir, int altMin, bool forceLog) {
         if (pLatestFrame) {
             float alt = g_droneState.GetAltitude();
             
-            // Nếu không dùng forceLog, ghi log phụ thuộc vào độ cao
+            // Nếu không dùng forceLog, ghi log phụ thuộc vào độ cao (Hysteresis)
             if (!forceLog) {
-                if (alt * 100.0f >= altMin) {
+                float altCm = alt * 100.0f;
+                if (altCm >= altMin) {
                     if (!isLogging) {
                         if (csvLogger.Open()) {
                             isLogging = true;
-                            std::cout << "Drone took off. Started Blackbox recording.\n";
+                            std::cout << "Drone reached target altitude. Started Blackbox recording.\n";
                         }
                     }
-                } else {
+                } else if (altCm < altDis) {
                     if (isLogging) {
                         csvLogger.Close();
                         isLogging = false;
-                        std::cout << "Drone landed. Stopped Blackbox recording.\n";
+                        std::cout << "Drone descended below threshold. Stopped Blackbox recording.\n";
                     }
                 }
             }
             
-            // Đang trong phiên bay (hoặc do forceLog) -> Ghi dữ liệu
             if (isLogging) {
-                csvLogger.LogObstacles(GetCurrentTimestampMs(), *pLatestFrame, alt);
+                csvLogger.LogObstacles(GetCurrentTimestampMs(), *pLatestFrame, -alt);
             }
         }
         
@@ -339,7 +339,7 @@ void SendDataToGcsThread(const std::string& ip, int port) {
 // ---------------------------------------------------------
 // THREAD 5: Gửi FC (OBSTACLE_DISTANCE)
 // ---------------------------------------------------------
-void SendDataToFcThread(const std::string& ip, int port, int altMin) {
+void SendDataToFcThread(const std::string& ip, int port, int altMin, int altDis) {
     struct sockaddr_in addr;
     int sock = CreateUdpSocket(ip, port, addr);
     if (sock < 0) return;
@@ -348,6 +348,8 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
     sharedFrameAbsolute_t pTempFrame;
 
     auto next_wake_time = std::chrono::steady_clock::now();
+
+    bool isActive = false;
 
     while (g_isAppRunning) {
         // Rút cạn queue để lấy được frame mới nhất
@@ -359,8 +361,9 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
             
-            float alt = g_droneState.GetAltitude();
-            bool is_active = (alt * 100.0f >= altMin); // Kiểm tra xem drone đã đạt độ cao tối thiểu chưa
+            float altCm = g_droneState.GetAltitude() * 100.0f;
+            if (altCm >= altMin) isActive = true;
+            else if (altCm < altDis) isActive = false;
             
             // Khởi tạo mảng 72 phần tử đại diện cho 72 cung (mỗi cung 5 độ).
             // Gán giá trị mặc định là UINT16_MAX (65535) -> Quy ước của MAVLink: Không có vật cản.
@@ -368,7 +371,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin) {
             for (uint8_t i=0; i<72; i++) distances[i] = UINT16_MAX;
 
             // Nếu drone đạt độ cao an toàn, bắt đầu phân tích điểm ảnh radar để chèn vào bản tin
-            if (is_active) {
+            if (isActive) {
                 for (const auto& obs : *pLatestFrame) {
                     float dist_cm = obs.range * 100.0f; // MAVLink yêu cầu đơn vị cm
                     
@@ -428,14 +431,16 @@ void FcListenerThread(int listenPort) {
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
+
     addr.sin_family = AF_INET;
     addr.sin_port = htons(listenPort);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        std::cerr << "FC Listener failed to bind port " << listenPort << "\n";
-        close(sock);
-        return;
+    // Thay vì bind() như server, ta gửi 1 ký tự rác 'X' tới mavlink-routerd 
+    // để nó biết địa chỉ và cổng của thread này mà gửi ngược MAVLink về.
+    char dummy = 'X';
+    if (sendto(sock, &dummy, 1, 0, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        std::cerr << "FC Listener failed to send dummy packet to port " << listenPort << "\n";
     }
 
     struct timeval tv;
@@ -455,19 +460,19 @@ void FcListenerThread(int listenPort) {
                         mavlink_global_position_int_t gpi;
                         mavlink_msg_global_position_int_decode(&msg, &gpi);
                         
-                        // FRD conversion
-                        float alt_m = (gpi.relative_alt / 1000.0f) * -1.0f;
+                        // Altitude (Dương = Bay lên)
+                        float altM = (gpi.relative_alt / 1000.0f);
                         if (gpi.hdg != 65535) {
-                            float yaw_rad = (gpi.hdg / 100.0f) * (M_PI / 180.0f);
+                            float yawRad = (gpi.hdg / 100.0f) * (M_PI / 180.0f);
                             float vx = gpi.vx / 100.0f;
                             float vy = gpi.vy / 100.0f;
                             
-                            float forward = vx * std::cos(yaw_rad) + vy * std::sin(yaw_rad);
-                            float right = -vx * std::sin(yaw_rad) + vy * std::cos(yaw_rad);
+                            float forward = vx * std::cos(yawRad) + vy * std::sin(yawRad);
+                            float right = -vx * std::sin(yawRad) + vy * std::cos(yawRad);
                             
-                            g_droneState.Update(forward, right, alt_m);
+                            g_droneState.Update(forward, right, altM);
                         } else {
-                            g_droneState.Update(0.0f, 0.0f, alt_m);
+                            g_droneState.Update(0.0f, 0.0f, altM);
                         }
                     }
                 }
@@ -505,8 +510,8 @@ int main(int argc, char **argv) {
     int localFcListenPort = 14551; // Port nghe telemetry từ FC
     std::string canInterface = "can0"; 
     std::string logDir = "/usr/local/etc/connect_radar_for_drone/blackbox"; // Thư mục lưu log mặc định
-    int altMin = 601;
-    int altDis = 300;
+    int altMin = 1001;
+    int altDis = 600;
     int parserRate = 50;
     int oldId = -1;
     int newId = -1;
@@ -573,9 +578,9 @@ int main(int argc, char **argv) {
     // Khởi tạo 6 Threads
     std::thread t1(ReadDataFromRadarThread, canInterface);
     std::thread t2(DataProcessingThread);
-    std::thread t3(WriteLogThread, logDir, altMin, forceLog);
+    std::thread t3(WriteLogThread, logDir, altMin, altDis, forceLog);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
-    std::thread t5(SendDataToFcThread, fcIp, fcPort, altMin);
+    std::thread t5(SendDataToFcThread, fcIp, fcPort, altMin, altDis);
     std::thread t6(FcListenerThread, localFcListenPort);
 
     // Join chờ ứng dụng kết thúc
