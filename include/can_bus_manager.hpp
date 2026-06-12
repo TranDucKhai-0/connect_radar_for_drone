@@ -10,7 +10,7 @@ private:
     int m_socketFd;
     bool m_isConnected;
 
-    // Các hàm private tuân theo quy tắc: _PascalCase
+    // Các hàm private tuân theo quy tắc
     bool _InitSocket();
 
 public:

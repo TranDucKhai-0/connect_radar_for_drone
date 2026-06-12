@@ -1,4 +1,3 @@
-
 sudo systemctl stop radar_setup.service can_setup.service
 sudo systemctl disable radar_setup.service can_setup.service
 sudo rm /etc/systemd/system/radar_setup.service

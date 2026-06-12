@@ -44,6 +44,16 @@ long long GetCurrentTimestampMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 }
 
+long long GetCurrentTimestampUsec() {
+    auto now = std::chrono::system_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+}
+
+uint32_t GetTimeBootMs() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+}
+
 int CreateUdpSocket(const std::string& ip, int port, struct sockaddr_in& addr) {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return -1;
@@ -144,6 +154,8 @@ void DataProcessingThread() {
                         break;
                 }
 
+                absObs.id = rel.id;
+
                 // Bù trừ vận tốc (Vận tốc gốc so với mặt đất)
                 absObs.vx = baseVx + vx;
                 absObs.vy = baseVy + vy;
@@ -164,7 +176,8 @@ void DataProcessingThread() {
                 newAbsPoints.push_back(absObs);
             }
 
-            // Data Association (Merge objects < 0.2m)
+            // Data Association (Merge objects < 0.2m) để chống điểm ảo (ghost points)
+            // Đồng thời xử lý an toàn vấn đề trùng ID giữa 4 radar độc lập.
             for (auto& new_point : newAbsPoints) {
                 float minDist = 0.2f; // Ngưỡng 0.2m
                 trackedObject_t* pBestMatch = nullptr;
@@ -182,20 +195,19 @@ void DataProcessingThread() {
                 }
                 
                 if (pBestMatch) {
-                    // Update existing object: Gán lại ID của object đã tồn tại cho object mới (gộp ID)
-                    new_point.id = pBestMatch->data.id;
+                    // Tìm thấy điểm cũ ở rất gần -> Cập nhật toạ độ và nhận luôn ID MỚI của radar
                     pBestMatch->data = new_point;
                     pBestMatch->lastSeenMs = now;
                 } else {
-                    // Create new tracked object: Giữ nguyên ID nguyên bản từ radar
+                    // Không trùng khoảng cách -> Vật thể mới hoàn toàn
                     trackedObjects.push_back({new_point, now});
                 }
             }
 
-            // Remove old objects (Không xuất hiện trong 500ms)
+            // Remove old objects (Không xuất hiện trong 300ms)
             trackedObjects.erase(
                 std::remove_if(trackedObjects.begin(), trackedObjects.end(),
-                               [now](const trackedObject_t& t) { return (now - t.lastSeenMs) > 500; }),
+                               [now](const trackedObject_t& t) { return (now - t.lastSeenMs) > 300; }),
                 trackedObjects.end()
             );
 
@@ -307,14 +319,14 @@ void SendDataToGcsThread(const std::string& ip, int port) {
         if (pLatestFrame) {
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
-            long long timestamp_ms = GetCurrentTimestampMs();
+            uint32_t time_boot_ms = GetTimeBootMs();
 
             for (const auto& obs : *pLatestFrame) {
                 uint16_t tracking_id = obs.id;
                 
                 mavlink_msg_obstacle_distance_3d_pack(
                     1, 195, &msg,
-                    timestamp_ms,
+                    time_boot_ms,
                     MAV_DISTANCE_SENSOR_RADAR,
                     MAV_FRAME_BODY_FRD,
                     tracking_id,
@@ -398,7 +410,7 @@ void SendDataToFcThread(const std::string& ip, int port, int altMin, int altDis)
 
             mavlink_msg_obstacle_distance_pack(
                 1, 195, &msg,
-                GetCurrentTimestampMs(), 
+                GetCurrentTimestampUsec(), 
                 MAV_DISTANCE_SENSOR_RADAR, 
                 distances,
                 5, // angular_width (5 độ mỗi sector)

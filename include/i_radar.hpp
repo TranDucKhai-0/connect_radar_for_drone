@@ -2,12 +2,13 @@
 #define IRADAR_HPP
 
 #include <vector>
+#include <stdint.h>
 #include <linux/can.h>
 
 // Định nghĩa chung cho một vật cản (áp dụng chung cho mọi Radar)
 typedef struct
 {
-    int id;            // ID của vật cản (do radar cung cấp, không phải ID riêng của radar)
+    uint8_t id;            // ID của vật cản (do radar cung cấp, không phải ID riêng của radar)
     float x;           // Vị trí tương đối trục x (Longitudinal distance) (m)
     float y;           // Vị trí tương đối trục y (Lateral distance) (m)
     float z;           // Vị trí tương đối trục z (Vertical distance) (m)
@@ -18,7 +19,7 @@ typedef struct
 
 typedef struct
 {
-    int id;            // ID của vật cản
+    uint8_t id;            // ID của vật cản
     float x;           // Vị trí tuyệt đối trục x (m)
     float y;           // Vị trí tuyệt đối trục y (m)
     float z;           // Vị trí tuyệt đối trục z (m)
