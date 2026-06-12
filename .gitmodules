@@ -2,3 +2,4 @@
 	path = library/c_library_v2
 	url = https://github.com/mavlink/c_library_v2.git
 
+/.build/
