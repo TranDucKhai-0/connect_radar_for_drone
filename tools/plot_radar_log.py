@@ -35,6 +35,38 @@ for col in required:
 
 df = df.dropna(subset=required)
 
+# =========================================================
+# KHỐI LỌC ĐIỂM RADAR THEO GÓC (Dễ dàng comment để tắt)
+# =========================================================
+# Radar 1: |Angle| <= 0.393 (Front)
+# Radar 2: 1.178 <= Angle <= 1.963 (Right)
+# Radar 3: |Angle| >= 2.749 (Back)
+# Radar 4: -1.963 <= Angle <= -1.178 (Left)
+if 'Angle' not in df.columns and 'X' in df.columns and 'Y' in df.columns:
+    df['Angle'] = np.arctan2(df['Y'], df['X'])
+
+if 'Angle' in df.columns:
+    mask_r1 = df['Angle'].abs() <= 0.393
+    mask_r2 = (df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)
+    mask_r3 = df['Angle'].abs() >= 2.749
+    mask_r4 = (df['Angle'] >= -1.963) & (df['Angle'] <= -1.178)
+    df = df[mask_r1 | mask_r2 | mask_r3 | mask_r4]
+# =========================================================
+
+# =========================================================
+# KHỐI LỌC KHOẢNG CÁCH RANGE < 20M CHO RADAR TRÁI/PHẢI (Dễ dàng comment để tắt)
+# =========================================================
+if 'Range' not in df.columns and 'X' in df.columns and 'Y' in df.columns:
+    df['Range'] = np.sqrt(df['X']**2 + df['Y']**2)
+
+if 'Angle' in df.columns and 'Range' in df.columns:
+    # Xác định các điểm thuộc Radar Trái (Radar 4) hoặc Phải (Radar 2)
+    is_left_right = ((df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)) | \
+                    ((df['Angle'] >= -1.963) & (df['Angle'] <= -1.178))
+    # Loại bỏ các điểm thuộc radar Trái/Phải có Range >= 20m
+    df = df[~(is_left_right & (df['Range'] >= 20.0))]
+# =========================================================
+
 t0 = df['TimestampMs'].min()
 df['t_sec'] = (df['TimestampMs'] - t0) / 1000.0
 
@@ -42,7 +74,7 @@ timestamps = sorted(df['TimestampMs'].unique())
 n_frames = len(timestamps)
 
 if n_frames == 0:
-    print("File CSV không có dữ liệu hợp lệ.")
+    print("File CSV không có dữ liệu hợp lệ (sau khi lọc góc).")
     sys.exit(1)
 
 print(f"Đọc được {len(df)} điểm, {n_frames} frames, "

@@ -30,6 +30,38 @@ def main():
         print(f"Lỗi: File CSV thiếu các cột cần thiết. Yêu cầu có: {required_cols}")
         sys.exit(1)
 
+    # =========================================================
+    # KHỐI LỌC ĐIỂM RADAR THEO GÓC (Dễ dàng comment để tắt)
+    # =========================================================
+    # Radar 1: |Angle| <= 0.393 (Front)
+    # Radar 2: 1.178 <= Angle <= 1.963 (Right)
+    # Radar 3: |Angle| >= 2.749 (Back)
+    # Radar 4: -1.963 <= Angle <= -1.178 (Left)
+    if 'Angle' not in df.columns and 'X' in df.columns and 'Y' in df.columns:
+        import numpy as np
+        df['Angle'] = np.arctan2(df['Y'], df['X'])
+
+    if 'Angle' in df.columns:
+        mask_r1 = df['Angle'].abs() <= 0.393
+        mask_r2 = (df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)
+        mask_r3 = df['Angle'].abs() >= 2.749
+        mask_r4 = (df['Angle'] >= -1.963) & (df['Angle'] <= -1.178)
+        df = df[mask_r1 | mask_r2 | mask_r3 | mask_r4]
+    # =========================================================
+    # KHỐI LỌC KHOẢNG CÁCH RANGE < 20M CHO RADAR TRÁI/PHẢI (Dễ dàng comment để tắt)
+    # =========================================================
+    if 'Range' not in df.columns and 'X' in df.columns and 'Y' in df.columns:
+        import numpy as np
+        df['Range'] = np.sqrt(df['X']**2 + df['Y']**2)
+
+    if 'Angle' in df.columns and 'Range' in df.columns:
+        # Xác định các điểm thuộc Radar Trái (Radar 4) hoặc Phải (Radar 2)
+        is_left_right = ((df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)) | \
+                        ((df['Angle'] >= -1.963) & (df['Angle'] <= -1.178))
+        # Loại bỏ các điểm thuộc radar Trái/Phải có Range >= 20m
+        df = df[~(is_left_right & (df['Range'] >= 20.0))]
+    # =========================================================
+
     print(f"Đã tải {len(df)} điểm dữ liệu. Đang vẽ 3D...")
 
     # Khởi tạo đồ thị 3D
