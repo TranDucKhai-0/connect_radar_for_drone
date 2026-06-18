@@ -278,7 +278,7 @@ void WriteLogThread(const std::string& logDir, int altMin, int altDis, bool forc
             }
             
             if (isLogging) {
-                csvLogger.LogObstacles(GetCurrentTimestampMs(), *pLatestFrame, -alt);
+                csvLogger.LogObstacles(GetCurrentTimestampUsec(), *pLatestFrame, -alt);
             }
         }
         

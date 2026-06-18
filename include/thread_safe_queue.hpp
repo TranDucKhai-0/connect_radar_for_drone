@@ -7,12 +7,17 @@
 #include <memory>
 #include <optional>
 
+// ---------------------------------------------------------
+// Hàng đợi an toàn đa luồng (Thread-safe Queue)
+// Dùng để truyền dữ liệu (vd: các frame vật cản) giữa các luồng một cách an toàn
+// Sử dụng Mutex và Condition Variable để đồng bộ
+// ---------------------------------------------------------
 template<typename T>
 class ThreadSafeQueue {
 private:
-    std::queue<T> queue_;
-    mutable std::mutex mutex_;
-    std::condition_variable cond_;
+    std::queue<T> queue_; // Cấu trúc dữ liệu hàng đợi gốc
+    mutable std::mutex mutex_; // Đảm bảo an toàn khi truy cập
+    std::condition_variable cond_; // Biến điều kiện dùng để block/wake luồng
 
 public:
     ThreadSafeQueue() = default;
@@ -21,6 +26,7 @@ public:
     ThreadSafeQueue(const ThreadSafeQueue&) = delete;
     ThreadSafeQueue& operator=(const ThreadSafeQueue&) = delete;
 
+    // Đẩy một phần tử vào hàng đợi và đánh thức 1 luồng đang đợi
     void Push(T value) {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push(std::move(value));
@@ -55,11 +61,13 @@ public:
         return res;
     }
 
+    // Kiểm tra hàng đợi có rỗng không (an toàn đa luồng)
     bool Empty() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return queue_.empty();
     }
 
+    // Lấy số lượng phần tử hiện tại
     size_t Size() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return queue_.size();
