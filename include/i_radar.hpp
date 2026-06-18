@@ -30,18 +30,23 @@ typedef struct
     float vz;          // Vận tốc tuyệt đối dọc trục z (m/s)
 } obstacleAbsolute_t; // Dữ liệu vật cản tổng hợp tuyệt đối
 
+// ---------------------------------------------------------
+// Interface (Giao diện) dùng chung cho tất cả các loại Radar
+// Giúp dễ dàng mở rộng và hỗ trợ đa dạng radar (MR72, NRA24, v.v...)
+// ---------------------------------------------------------
 class IRadar
 {
 public:
     virtual ~IRadar() = default;
 
-    // Khởi tạo các tham số, cấu hình radar (ví dụ angle offset)
+    // Khởi tạo các tham số, cấu hình radar (ví dụ angle offset / mounting yaw)
     virtual void Init(float mountingYaw) = 0;
 
-    // Parse data từ CAN frame, trả về true nếu hoàn thành 1 chu kỳ parse
+    // Parse data từ CAN frame hoặc các dạng data khác tuỳ radar
+    // Trả về true nếu hoàn thành việc bóc tách thành công một điểm ảnh
     virtual bool ParseCanFrame(const struct can_frame &frame, float droneVForward, float droneVRight) = 0;
 
-    // Lấy số lượng vật cản hiện tại
+    // Lấy số lượng vật cản hiện tại mà radar này phát hiện được
     virtual int GetObstacleCount() const = 0;
 };
 

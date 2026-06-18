@@ -172,6 +172,16 @@ void DataProcessingThread() {
 
                 // lọc bỏ data rác
                 if (absObs.range < 2.0f || absObs.range > 40.0f) continue;
+                if ((radarId == 2 || radarId == 4 ) && absObs.range < 2.0f || absObs.range > 20.0f) continue;
+
+                // if (radarId == 1 && std::abs(absObs.angle) > 0.3926991)
+                //     continue;
+                // if (radarId == 2 && (absObs.angle < 1.1780972 || absObs.angle > 1.9634954))
+                //     continue;
+                // if (radarId == 3 && std::abs(absObs.angle) > 2.7488935)
+                //     continue;
+                // if (radarId == 4 && (absObs.angle < -1.9634954 || absObs.angle > -1.1780972))
+                //     continue;
 
                 newAbsPoints.push_back(absObs);
             }
@@ -278,7 +288,7 @@ void WriteLogThread(const std::string& logDir, int altMin, int altDis, bool forc
             }
             
             if (isLogging) {
-                csvLogger.LogObstacles(GetCurrentTimestampMs(), *pLatestFrame, -alt);
+                csvLogger.LogObstacles(GetCurrentTimestampUsec(), *pLatestFrame, -alt);
             }
         }
         
