@@ -110,10 +110,15 @@ void DataProcessingThread() {
     std::vector<trackedObject_t> trackedObjects;
 
     constexpr float timeDelayThreadSleepSeconds = CYCLE_TIME_MS / 1000.0f; // Bù trừ trễ thời gian thread ngủ để tăng độ chính xác khi tính toán bù trừ (s)
+    long long lastPushTimeMs = GetCurrentTimestampMs();
 
     while (g_isAppRunning) {
-        if (g_queueRelative.TryPop(framePair)) {
-            long long now = GetCurrentTimestampMs();
+        bool gotData = false;
+        long long now = GetCurrentTimestampMs();
+
+        // Rút sạch tất cả dữ liệu hiện có trong queue g_queueRelative
+        while (g_queueRelative.TryPop(framePair)) {
+            gotData = true;
             int radarId = framePair.first;
             frameRelative_t& relativeFrame = framePair.second;
 
@@ -154,7 +159,9 @@ void DataProcessingThread() {
                         break;
                 }
 
-                absObs.id = rel.id;
+                // Tạo ID duy nhất bằng cách kết hợp radarId và ID vật thể gốc
+                // Mỗi radar MR72 tối đa có 64 vật cản (ID 0..63)
+                absObs.id = (radarId - 1) * 64 + rel.id;
 
                 // Bù trừ vận tốc (Vận tốc gốc so với mặt đất)
                 absObs.vx = baseVx + vx;
@@ -162,59 +169,51 @@ void DataProcessingThread() {
                 absObs.vz = rel.vz;
 
                 // Bù trừ trễ thời gian thread ngủ 
-                absObs.x = baseX + absObs.vx * timeDelayThreadSleepSeconds;
-                absObs.y = baseY + absObs.vy * timeDelayThreadSleepSeconds;
+                absObs.x = baseX + baseVx * timeDelayThreadSleepSeconds;
+                absObs.y = baseY + baseVy * timeDelayThreadSleepSeconds;
                 absObs.z = rel.z;
 
                 // Chuyển sang Polar
                 absObs.angle = atan2f(absObs.y, absObs.x);
                 absObs.range = sqrtf(absObs.x * absObs.x + absObs.y * absObs.y);
 
-                // // lọc bỏ data rác
-                // if (absObs.range < 2.0f || absObs.range > 40.0f) continue;
-                // if ((radarId == 2 || radarId == 4 ) && (absObs.range < 2.0f || absObs.range > 20.0f)) continue;
-
-                // Bộ lọc theo góc
-                // if (radarId == 1 && std::abs(absObs.angle) > 0.3926991)
-                //     continue;
-                // if (radarId == 2 && (absObs.angle < 1.1780972 || absObs.angle > 1.9634954))
-                //     continue;
-                // if (radarId == 3 && std::abs(absObs.angle) < 2.7488935)
-                //     continue;
-                // if (radarId == 4 && (absObs.angle < -1.9634954 || absObs.angle > -1.1780972))
-                //     continue;
+                // Chỉ lấy trong FOV
+                if (std::abs(absObs.angle) > 0.3926991)
+                    continue;
+                if (absObs.angle < 1.1780972 || absObs.angle > 1.9634954)
+                    continue;
+                if (std::abs(absObs.angle) > 2.7488935)
+                    continue;
+                if (absObs.angle < -1.9634954 || absObs.angle > -1.1780972)
+                    continue;
 
                 newAbsPoints.push_back(absObs);
             }
 
-            // Data Association (Merge objects < 0.2m) để chống điểm ảo (ghost points)
-            // Đồng thời xử lý an toàn vấn đề trùng ID giữa 4 radar độc lập.
+            // Cập nhật tọa độ vật cản vào trackedObjects dựa theo ID duy nhất
             for (auto& new_point : newAbsPoints) {
-                float minDist = 0.2f; // Ngưỡng 0.2m
                 trackedObject_t* pBestMatch = nullptr;
                 
                 for (auto& track : trackedObjects) {
-                    float dx = track.data.x - new_point.x;
-                    float dy = track.data.y - new_point.y;
-                    float dz = track.data.z - new_point.z;
-                    float dist = sqrtf(dx*dx + dy*dy + dz*dz);
-                    
-                    if (dist < minDist) {
-                        minDist = dist;
+                    if (track.data.id == new_point.id) {
                         pBestMatch = &track;
+                        break;
                     }
                 }
                 
                 if (pBestMatch) {
-                    // Tìm thấy điểm cũ ở rất gần -> Cập nhật toạ độ và nhận luôn ID MỚI của radar
+                    // Tìm thấy điểm cũ khớp ID -> Cập nhật tọa độ và thời gian cập nhật
                     pBestMatch->data = new_point;
                     pBestMatch->lastSeenMs = now;
                 } else {
-                    // Không trùng khoảng cách -> Vật thể mới hoàn toàn
+                    // ID mới hoàn toàn -> Thêm vào danh sách theo dõi
                     trackedObjects.push_back({new_point, now});
                 }
             }
+        }
 
+        // Định kỳ 100ms (hoặc khi có dữ liệu mới) thực hiện cập nhật và đẩy đi
+        if (now - lastPushTimeMs >= CYCLE_TIME_MS || gotData) {
             // Remove old objects (Không xuất hiện trong 300ms)
             trackedObjects.erase(
                 std::remove_if(trackedObjects.begin(), trackedObjects.end(),
@@ -232,8 +231,13 @@ void DataProcessingThread() {
             g_queueLog.Push(pAbsFrame);
             g_queueGcs.Push(pAbsFrame);
             g_queueFc.Push(pAbsFrame);
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+            lastPushTimeMs = now;
+        }
+
+        if (!gotData) {
+            // Ngủ ngắn nếu hàng đợi trống để tiết kiệm tài nguyên CPU
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
     std::cout << "DataProcessingThread Exited.\n";

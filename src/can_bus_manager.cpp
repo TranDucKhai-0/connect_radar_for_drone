@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <sys/time.h>
 
 CanBusManager::CanBusManager(const std::string& interfaceName)
     : m_interfaceName(interfaceName), m_socketFd(-1), m_isConnected(false) {} // Khởi tạo biến interface và đặt fd bằng -1
@@ -39,6 +40,14 @@ bool CanBusManager::_InitSocket() {
         close(m_socketFd);
         m_socketFd = -1;
         return false;
+    }
+
+    // Cấu hình timeout cho socket CAN (1s) để tránh bị kẹt luồng khi tắt ứng dụng
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    if (setsockopt(m_socketFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        std::cerr << "Error setting socket timeout\n";
     }
 
     return true; // Khởi tạo thành công
