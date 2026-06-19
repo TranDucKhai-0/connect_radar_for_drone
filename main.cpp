@@ -167,8 +167,8 @@ void DataProcessingThread() {
                 absObs.z = rel.z;
 
                 // Chuyển sang Polar
-                absObs.angle = std::atan2(absObs.y, absObs.x);
-                absObs.range = std::sqrt(absObs.x * absObs.x + absObs.y * absObs.y);
+                absObs.angle = atan2f(absObs.y, absObs.x);
+                absObs.range = sqrtf(absObs.x * absObs.x + absObs.y * absObs.y);
 
                 // // lọc bỏ data rác
                 // if (absObs.range < 2.0f || absObs.range > 40.0f) continue;
@@ -197,7 +197,7 @@ void DataProcessingThread() {
                     float dx = track.data.x - new_point.x;
                     float dy = track.data.y - new_point.y;
                     float dz = track.data.z - new_point.z;
-                    float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+                    float dist = sqrtf(dx*dx + dy*dy + dz*dz);
                     
                     if (dist < minDist) {
                         minDist = dist;
@@ -490,8 +490,8 @@ void FcListenerThread(int listenPort) {
                             float vx = gpi.vx / 100.0f;
                             float vy = gpi.vy / 100.0f;
                             
-                            float forward = vx * std::cos(yawRad) + vy * std::sin(yawRad);
-                            float right = -vx * std::sin(yawRad) + vy * std::cos(yawRad);
+                            float forward = vx * cosf(yawRad) + vy * sinf(yawRad);
+                            float right = -vx * sinf(yawRad) + vy * cosf(yawRad);
                             
                             g_droneState.Update(forward, right, altM);
                         } else {

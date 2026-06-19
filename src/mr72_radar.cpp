@@ -57,8 +57,8 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         obs.vz = 0.0f;
 
         // x,y,z -> range,angle
-        obs.angle = std::atan2(obs.y, obs.x); // rad
-        obs.range = std::sqrtf(obs.x * obs.x + obs.y * obs.y); // m
+        obs.angle = atan2f(obs.y, obs.x); // rad
+        obs.range = sqrtf(obs.x * obs.x + obs.y * obs.y); // m
 
         // lọc bỏ data rác
         if (obs.range < 2.0f || obs.range > 40.0f) return false;
@@ -67,8 +67,8 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         if ((m_id == 2 || m_id == 4) && (obs.range < 2.0f || obs.range > 20.0f)) return false;
 
         // Chuyển đổi từ range, angle ngược lại x, y, z
-        obs.x = obs.range * std::cosf(obs.angle);
-        obs.y = obs.range * std::sinf(obs.angle);
+        obs.x = obs.range * cosf(obs.angle);
+        obs.y = obs.range * sinf(obs.angle);
         obs.z = 0.0f;
 
         m_obstacles.clear();
