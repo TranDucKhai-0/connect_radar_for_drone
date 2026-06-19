@@ -178,7 +178,7 @@ void DataProcessingThread() {
                 //     continue;
                 // if (radarId == 2 && (absObs.angle < 1.1780972 || absObs.angle > 1.9634954))
                 //     continue;
-                // if (radarId == 3 && std::abs(absObs.angle) > 2.7488935)
+                // if (radarId == 3 && std::abs(absObs.angle) < 2.7488935)
                 //     continue;
                 // if (radarId == 4 && (absObs.angle < -1.9634954 || absObs.angle > -1.1780972))
                 //     continue;
