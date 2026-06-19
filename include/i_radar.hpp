@@ -12,6 +12,8 @@ typedef struct
     float x;           // Vị trí tương đối trục x (Longitudinal distance) (m)
     float y;           // Vị trí tương đối trục y (Lateral distance) (m)
     float z;           // Vị trí tương đối trục z (Vertical distance) (m)
+    float range;       // Khoảng cách tương đối trực tiếp từ radar (m)
+    float angle;       // Góc tương đối đối giữa trục x (Front) và vật cản (rad)
     float vx;          // Vận tốc tương đối dọc trục x (m/s)
     float vy;          // Vận tốc tương đối dọc trục y (m/s)
     float vz;          // Vận tốc tương đối dọc trục z (m/s)

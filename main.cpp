@@ -170,10 +170,11 @@ void DataProcessingThread() {
                 absObs.angle = std::atan2(absObs.y, absObs.x);
                 absObs.range = std::sqrt(absObs.x * absObs.x + absObs.y * absObs.y);
 
-                // lọc bỏ data rác
-                if (absObs.range < 2.0f || absObs.range > 40.0f) continue;
-                if ((radarId == 2 || radarId == 4 ) && absObs.range < 2.0f || absObs.range > 20.0f) continue;
+                // // lọc bỏ data rác
+                // if (absObs.range < 2.0f || absObs.range > 40.0f) continue;
+                // if ((radarId == 2 || radarId == 4 ) && (absObs.range < 2.0f || absObs.range > 20.0f)) continue;
 
+                // Bộ lọc theo góc
                 // if (radarId == 1 && std::abs(absObs.angle) > 0.3926991)
                 //     continue;
                 // if (radarId == 2 && (absObs.angle < 1.1780972 || absObs.angle > 1.9634954))
