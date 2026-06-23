@@ -17,6 +17,8 @@
 #include <cstring>
 #include <algorithm>
 
+#define NUMBER_FRAME_OUT 3 // số khung hình liên tiếp điểm ma xuất hiện 
+
 #define CYCLE_TIME_MS 100 // Chu kỳ 100ms (10Hz) để gửi tới FC và GCS và ghi log
 
 // Tích hợp thư viện MAVLink C
@@ -116,6 +118,7 @@ struct trackedObject_t
 {
     obstacleAbsolute_t data;
     long long lastSeenMs;
+    int frozenCount = 0;
 };
 
 // ---------------------------------------------------------
@@ -250,6 +253,25 @@ void DataProcessingThread()
 
                 if (pBestMatch)
                 {
+                    // Tính toán chênh lệch tọa độ và vận tốc giữa khung hình cũ và mới
+                    float dx = std::abs(pBestMatch->data.x - new_point.x);
+                    float dy = std::abs(pBestMatch->data.y - new_point.y);
+                    float dz = std::abs(pBestMatch->data.z - new_point.z);
+                    float dvx = std::abs(pBestMatch->data.vx - new_point.vx);
+                    float dvy = std::abs(pBestMatch->data.vy - new_point.vy);
+                    float dvz = std::abs(pBestMatch->data.vz - new_point.vz);
+
+                    // Kiểm tra điều kiện "đóng băng" dữ liệu
+                    if (dx < 0.00001f && dy < 0.00001f && dz < 0.00001f &&
+                        dvx < 0.1f && dvy < 0.1f && dvz < 0.1f)
+                    {
+                        pBestMatch->frozenCount++;
+                    }
+                    else
+                    {
+                        pBestMatch->frozenCount = 0; // Reset nếu có sự dịch chuyển thực tế
+                    }
+
                     // Tìm thấy điểm cũ khớp ID -> Cập nhật tọa độ và thời gian cập nhật
                     pBestMatch->data = new_point;
                     pBestMatch->lastSeenMs = now;
@@ -257,7 +279,7 @@ void DataProcessingThread()
                 else
                 {
                     // ID mới hoàn toàn -> Thêm vào danh sách theo dõi
-                    trackedObjects.push_back({new_point, now});
+                    trackedObjects.push_back({new_point, now, 0});
                 }
             }
         }
@@ -269,7 +291,7 @@ void DataProcessingThread()
             trackedObjects.erase(
                 std::remove_if(trackedObjects.begin(), trackedObjects.end(),
                                [now](const trackedObject_t &t)
-                               { return (now - t.lastSeenMs) > 300; }),
+                               { return (now - t.lastSeenMs) > 200; }),
                 trackedObjects.end());
 
             // Phân phối Frame tổng hợp cho Output
@@ -277,7 +299,11 @@ void DataProcessingThread()
             pAbsFrame->reserve(trackedObjects.size());
             for (const auto &track : trackedObjects)
             {
-                pAbsFrame->push_back(track.data);
+                // Chỉ gửi đi các điểm KHÔNG bị đóng băng quá 3 khung hình liên tiếp
+                if (track.frozenCount < NUMBER_FRAME_OUT - 1)
+                {
+                    pAbsFrame->push_back(track.data);
+                }
             }
 
             g_queueLog.Push(pAbsFrame);
