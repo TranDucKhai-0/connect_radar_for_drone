@@ -61,10 +61,9 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         obs.range = sqrtf(obs.x * obs.x + obs.y * obs.y); // m
 
         // lọc bỏ data rác
-        if (obs.range < 2.0f || obs.range > 40.0f) return false;
-        
+        if ((m_id == 1 || m_id == 3) && (obs.range < 2.0f || obs.range > 40.0f)) return false;
         // Lọc khoảng cách radar ID 2 và 4 trong phạm vi 2.0m - 20.0m
-        if ((m_id == 2 || m_id == 4) && (obs.range < 2.0f || obs.range > 20.0f)) return false;
+        else if ((m_id == 2 || m_id == 4) && (obs.range < 2.0f || obs.range > 20.0f)) return false;
 
         // Chuyển đổi từ range, angle ngược lại x, y, z
         obs.x = obs.range * cosf(obs.angle);
