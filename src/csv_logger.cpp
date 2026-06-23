@@ -67,7 +67,7 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
     for (const auto &obs : obstacles)
     {
         // Lọc bỏ data rác ngoài dải hoạt động MR72 (2m - 40m)
-        if (obs.range < 2.0f || obs.range > 40.0f) continue;
+        // if (obs.range < 2.0f || obs.range > 40.0f) continue;
 
         // Ghi các thuộc tính của vật thể ra dạng phân cách bằng dấu phẩy
         m_fileStream << std::fixed << std::setprecision(3)
