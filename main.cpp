@@ -512,7 +512,7 @@ void SendDataToFcThread(const std::string &ip, int port)
             // Cung của radar đằng sau
             for (uint8_t i = 31; i < 41; i++)
                 distances[i] = 4001;
-            // Cung của radar bên trái
+            // Cung của radar bên trái (FOV ~45 độ: 247.5 đến 292.5 độ, tương ứng cung 49..58)
             for (uint8_t i = 49; i < 59; i++)
                 distances[i] = 4001;
 
