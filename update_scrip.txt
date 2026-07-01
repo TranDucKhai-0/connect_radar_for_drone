@@ -14,4 +14,4 @@ chmod +x setup.sh
 sudo ./setup.sh
 
 ! check
-sudo systemctl status radar_setup.service
+sudo systemctl status radar_setup.service   

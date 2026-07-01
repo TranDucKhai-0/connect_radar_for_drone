@@ -254,16 +254,18 @@ void DataProcessingThread()
                 if (pBestMatch)
                 {
                     // Tính toán chênh lệch tọa độ và vận tốc giữa khung hình cũ và mới
-                    float dx = std::abs(pBestMatch->data.x - new_point.x);
-                    float dy = std::abs(pBestMatch->data.y - new_point.y);
-                    float dz = std::abs(pBestMatch->data.z - new_point.z);
-                    float dvx = std::abs(pBestMatch->data.vx - new_point.vx);
-                    float dvy = std::abs(pBestMatch->data.vy - new_point.vy);
-                    float dvz = std::abs(pBestMatch->data.vz - new_point.vz);
+                    float dx = pBestMatch->data.x - new_point.x;
+                    float dy = pBestMatch->data.y - new_point.y;
+                    float dz = pBestMatch->data.z - new_point.z;
+                    float dist_pos = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+                    float dvx = pBestMatch->data.vx - new_point.vx;
+                    float dvy = pBestMatch->data.vy - new_point.vy;
+                    float dvz = pBestMatch->data.vz - new_point.vz;
+                    float dist_vel = std::sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
 
                     // Kiểm tra điều kiện "đóng băng" dữ liệu
-                    if (dx < 0.00001f && dy < 0.00001f && dz < 0.00001f &&
-                        dvx < 0.1f && dvy < 0.1f && dvz < 0.1f)
+                    if (dist_pos < 0.001f && dist_vel < 0.1f)
                     {
                         pBestMatch->frozenCount++;
                     }
@@ -664,8 +666,8 @@ int main(int argc, char **argv)
     int localFcListenPort = 14551; // Port nghe telemetry từ FC
     std::string canInterface = "can0";
     std::string logDir = "/usr/local/etc/connect_radar_for_drone/blackbox"; // Thư mục lưu log mặc định
-    int altMin = 1001;
-    int altDis = 600;
+    int altMin = 1001; // cm
+    int altDis = 500; // cm
     int parserRate = 50;
     int oldId = -1;
     int newId = -1;
