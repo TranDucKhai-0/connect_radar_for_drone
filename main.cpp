@@ -500,20 +500,10 @@ void SendDataToFcThread(const std::string &ip, int port)
             uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
             mavlink_message_t msg;
 
-            // Gán giá trị mặc định là max_distance + 1
-            // Cung của radar trước mặt
-            for (uint8_t i = 67; i < 72; i++)
-                distances[i] = 4001;
-            for (uint8_t i = 0; i < 5; i++)
-                distances[i] = 4001;
-            // Cung của radar bên phải
-            for (uint8_t i = 13; i < 23; i++)
-                distances[i] = 4001;
-            // Cung của radar đằng sau
-            for (uint8_t i = 31; i < 41; i++)
-                distances[i] = 4001;
-            // Cung của radar bên trái (FOV ~45 độ: 247.5 đến 292.5 độ, tương ứng cung 49..58)
-            for (uint8_t i = 49; i < 59; i++)
+            // Khởi tạo mảng 72 phần tử đại diện cho 72 cung (mỗi cung 5 độ).
+            uint16_t distances[72];
+            // Gán giá trị mặc định là 4001 cho toàn bộ cung
+            for (uint8_t i = 0; i < 72; i++)
                 distances[i] = 4001;
 
             // Nếu drone đạt độ cao an toàn, bắt đầu phân tích điểm ảnh radar để chèn vào bản tin
