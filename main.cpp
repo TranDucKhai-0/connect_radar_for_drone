@@ -118,7 +118,7 @@ void ReadDataFromRadarThread(const std::string &canIface)
 struct trackedObject_t
 {
     obstacleAbsolute_t data;
-    long long lastSeenMs;
+    uint32_t lastSeenMs;
     int frozenCount = 0;
 };
 
@@ -131,12 +131,12 @@ void DataProcessingThread()
     std::vector<trackedObject_t> trackedObjects;
 
     constexpr float timeDelayThreadSleepSeconds = CYCLE_TIME_MS / 1000.0f; // Bù trừ trễ thời gian thread ngủ để tăng độ chính xác khi tính toán bù trừ (s)
-    long long lastPushTimeMs = GetCurrentTimestampMs();
+    uint32_t lastPushTimeMs = GetTimeBootMs();
 
     while (g_isAppRunning)
     {
         bool gotData = false;
-        long long now = GetCurrentTimestampMs();
+        uint32_t now = GetTimeBootMs();
 
         // Rút sạch tất cả dữ liệu hiện có trong queue g_queueRelative
         while (g_queueRelative.TryPop(framePair))
@@ -626,18 +626,18 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     uint8_t buffer[2048];
-    long long lastDummySentMs = 0;
-    long long lastPacketReceivedMs = 0;
+    uint32_t lastDummySentMs = 0;
+    uint32_t lastPacketReceivedMs = 0;
 
     while (g_isAppRunning)
     {
-        long long now = GetCurrentTimestampMs();
+        uint32_t now = GetTimeBootMs();
 
         // Gửi gói tin dummy định kỳ nếu không nhận được dữ liệu (hoặc khi bắt đầu)
-        // Nếu quá 2 giây không nhận được gói tin nào từ FC, và đã quá 1 giây từ lần gửi dummy trước đó:
-        if (now - lastPacketReceivedMs > 2000)
+        // Nếu chưa từng nhận gói nào/quá 2 giây mất kết nối, và chưa từng gửi dummy/đã quá 1 giây từ lần gửi dummy trước đó:
+        if (lastPacketReceivedMs == 0 || now - lastPacketReceivedMs > 2000)
         {
-            if (now - lastDummySentMs > 1000)
+            if (lastDummySentMs == 0 || now - lastDummySentMs > 1000)
             {
                 char dummy = 'X';
                 sendto(sock, &dummy, 1, 0, (struct sockaddr *)&addr, sizeof(addr));

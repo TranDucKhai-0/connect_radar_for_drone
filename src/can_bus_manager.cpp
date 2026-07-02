@@ -27,7 +27,8 @@ bool CanBusManager::_InitSocket() {
     }
 
     // Lấy chỉ số index của interface CAN (VD: can0)
-    std::strcpy(ifr.ifr_name, m_interfaceName.c_str());
+    std::strncpy(ifr.ifr_name, m_interfaceName.c_str(), IFNAMSIZ - 1);
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     ioctl(m_socketFd, SIOCGIFINDEX, &ifr);
 
     // Chuẩn bị địa chỉ để bind socket
