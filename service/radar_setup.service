@@ -1,6 +1,6 @@
 [Unit]
 Description=Radar Obstacle Detection Service (C++ Version)
-After=network.target can_setup.service
+After=network.target can_setup.service mavlink-router.service mavlink-routerd.service
 Requires=can_setup.service
 
 [Service]
