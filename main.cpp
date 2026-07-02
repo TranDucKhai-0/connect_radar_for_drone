@@ -14,6 +14,7 @@
 #include <cmath>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <cstring>
 #include <algorithm>
 
@@ -59,6 +60,42 @@ uint32_t GetTimeBootMs()
 {
     auto now = std::chrono::steady_clock::now();
     return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+}
+
+void SystemdNotifyWatchdog()
+{
+    const char* socketPath = std::getenv("NOTIFY_SOCKET");
+    if (!socketPath)
+        return;
+
+    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return;
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+
+    size_t pathLen = strlen(socketPath);
+    if (pathLen >= sizeof(addr.sun_path))
+    {
+        close(fd);
+        return;
+    }
+
+    if (socketPath[0] == '@')
+    {
+        addr.sun_path[0] = '\0';
+        std::strncpy(addr.sun_path + 1, socketPath + 1, pathLen - 1);
+    }
+    else
+    {
+        std::strncpy(addr.sun_path, socketPath, pathLen);
+    }
+
+    const char* msg = "WATCHDOG=1";
+    sendto(fd, msg, strlen(msg), 0, (struct sockaddr*)&addr, sizeof(addr.sun_family) + pathLen);
+    close(fd);
 }
 
 int CreateUdpSocket(const std::string &ip, int port, struct sockaddr_in &addr)
@@ -137,6 +174,14 @@ void DataProcessingThread()
     {
         bool gotData = false;
         uint32_t now = GetTimeBootMs();
+
+        // Gửi watchdog ping đến systemd định kỳ mỗi 1 giây để chứng minh luồng chính vẫn hoạt động
+        static uint32_t lastWatchdogPingMs = 0;
+        if (now - lastWatchdogPingMs >= 1000)
+        {
+            SystemdNotifyWatchdog();
+            lastWatchdogPingMs = now;
+        }
 
         // Rút sạch tất cả dữ liệu hiện có trong queue g_queueRelative
         while (g_queueRelative.TryPop(framePair))
@@ -504,8 +549,10 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
             for (uint8_t i = 0; i < 72; i++)
                 distances[i] = 4001;
 
+            bool isSendFCActive = g_isSystemActive; // Lấy cờ trạng thái hệ thống tại thời điểm này
+
             // Nếu drone đạt độ cao an toàn, bắt đầu phân tích điểm ảnh radar để chèn vào bản tin
-            if (g_isSystemActive)
+            if (isSendFCActive)
             {
                 for (const auto &obs : *pLatestFrame)
                 {
@@ -549,7 +596,7 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
             }
             else
             {
-                if (g_isSystemActive)
+                if (isSendFCActive)
                 {
                     if (!isLogging)
                     {
