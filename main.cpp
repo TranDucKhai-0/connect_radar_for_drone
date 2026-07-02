@@ -469,7 +469,7 @@ void SendDataToGcsThread(const std::string &ip, int port)
 // ---------------------------------------------------------
 // THREAD 5: Gửi FC (OBSTACLE_DISTANCE)
 // ---------------------------------------------------------
-void SendDataToFcThread(const std::string &ip, int port)
+void SendDataToFcThread(const std::string &ip, int port, const std::string &logDir, bool forceLog)
 {
     struct sockaddr_in addr;
     int sock = CreateUdpSocket(ip, port, addr);
@@ -479,13 +479,11 @@ void SendDataToFcThread(const std::string &ip, int port)
     sharedFrameAbsolute_t pLatestFrame;
     sharedFrameAbsolute_t pTempFrame;
 
+    // Ghi log đồng bộ CubeFC
+    std::string logFilePath = logDir + "/cubefc_radar_log.csv";
+    CsvLogger csvLogger(logFilePath, LoggerType::FC);
+    bool isLogging = false;
     auto next_wake_time = std::chrono::steady_clock::now();
-    // Khởi tạo mảng 72 phần tử đại diện cho 72 cung (mỗi cung 5 độ).
-    uint16_t distances[72];
-    // Gán giá trị mặc định là UINT16_MAX cho những cung nằm ngoài FOV
-    for(uint8_t i = 0; i < 72; i++)
-        distances[i] = UINT16_MAX;
-
 
     while (g_isAppRunning)
     {
@@ -537,6 +535,47 @@ void SendDataToFcThread(const std::string &ip, int port)
                 }
             }
 
+            // Ghi log đồng bộ CubeFC
+            if (forceLog)
+            {
+                if (!isLogging)
+                {
+                    if (csvLogger.Open())
+                    {
+                        isLogging = true;
+                        std::cout << "Force Log mode enabled. Started cubefc_log recording.\n";
+                    }
+                }
+            }
+            else
+            {
+                if (g_isSystemActive)
+                {
+                    if (!isLogging)
+                    {
+                        if (csvLogger.Open())
+                        {
+                            isLogging = true;
+                            std::cout << "System active. Started cubefc_log recording.\n";
+                        }
+                    }
+                }
+                else
+                {
+                    if (isLogging)
+                    {
+                        csvLogger.Close();
+                        isLogging = false;
+                        std::cout << "System inactive. Stopped cubefc_log recording.\n";
+                    }
+                }
+            }
+
+            if (isLogging)
+            {
+                csvLogger.LogFcDistances(GetCurrentTimestampUsec(), distances);
+            }
+
             mavlink_msg_obstacle_distance_pack(
                 1, 195, &msg,
                 GetCurrentTimestampUsec(),
@@ -559,6 +598,8 @@ void SendDataToFcThread(const std::string &ip, int port)
             next_wake_time = current_time;
         std::this_thread::sleep_until(next_wake_time);
     }
+    if (isLogging)
+        csvLogger.Close();
     close(sock);
     std::cout << "SendDataToFcThread Exited.\n";
 }
@@ -579,25 +620,35 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
     addr.sin_port = htons(listenPort);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    // Thay vì bind() như server, ta gửi 1 ký tự rác 'X' tới mavlink-routerd
-    // để nó biết địa chỉ và cổng của thread này mà gửi ngược MAVLink về.
-    char dummy = 'X';
-    if (sendto(sock, &dummy, 1, 0, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-    {
-        std::cerr << "FC Listener failed to send dummy packet to port " << listenPort << "\n";
-    }
-
     struct timeval tv;
     tv.tv_sec = 0;
     tv.tv_usec = 100000;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     uint8_t buffer[2048];
+    long long lastDummySentMs = 0;
+    long long lastPacketReceivedMs = 0;
+
     while (g_isAppRunning)
     {
+        long long now = GetCurrentTimestampMs();
+
+        // Gửi gói tin dummy định kỳ nếu không nhận được dữ liệu (hoặc khi bắt đầu)
+        // Nếu quá 2 giây không nhận được gói tin nào từ FC, và đã quá 1 giây từ lần gửi dummy trước đó:
+        if (now - lastPacketReceivedMs > 2000)
+        {
+            if (now - lastDummySentMs > 1000)
+            {
+                char dummy = 'X';
+                sendto(sock, &dummy, 1, 0, (struct sockaddr *)&addr, sizeof(addr));
+                lastDummySentMs = now;
+            }
+        }
+
         int n = recv(sock, buffer, sizeof(buffer), 0);
         if (n > 0)
         {
+            lastPacketReceivedMs = now;
             mavlink_message_t msg;
             mavlink_status_t status;
             for (int i = 0; i < n; i++)
@@ -789,7 +840,7 @@ int main(int argc, char **argv)
     std::thread t2(DataProcessingThread);
     std::thread t3(WriteLogThread, logDir, forceLog);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
-    std::thread t5(SendDataToFcThread, fcIp, fcPort);
+    std::thread t5(SendDataToFcThread, fcIp, fcPort, logDir, forceLog);
     std::thread t6(FcListenerThread, localFcListenPort, altMin, altDis);
 
     // Join chờ ứng dụng kết thúc

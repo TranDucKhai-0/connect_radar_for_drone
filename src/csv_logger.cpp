@@ -5,7 +5,7 @@
 #include <cerrno>
 #include <cstring>
 
-CsvLogger::CsvLogger(const std::string &filename) : m_filename(filename) {}
+CsvLogger::CsvLogger(const std::string &filename, LoggerType type) : m_filename(filename), m_type(type) {}
 
 CsvLogger::~CsvLogger()
 {
@@ -41,8 +41,15 @@ bool CsvLogger::Open()
         return false;
     }
 
-    // Ghi Header của file CSV để phục vụ vẽ đồ thị sau này
-    m_fileStream << "TimestampUsec,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
+    // Ghi Header của file CSV dựa trên loại logger
+    if (m_type == LoggerType::RADAR)
+    {
+        m_fileStream << "TimestampUsec,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
+    }
+    else
+    {
+        m_fileStream << "TimestampUsec,SectorIdx,DistanceCm\n";
+    }
     m_fileStream.flush(); // Đẩy ngay xuống đĩa cứng
 
     std::cout << "CsvLogger: Logging to " << m_filename << "\n";
@@ -84,4 +91,22 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
     }
 
     m_fileStream.flush(); // Đảm bảo dữ liệu không bị mất nếu chương trình crash
+}
+
+// Ghi thông tin các cung gửi sang FC (được đồng bộ)
+void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances[72])
+{
+    if (!m_fileStream.is_open())
+        return;
+
+    for (uint8_t i = 0; i < 72; i++)
+    {
+        if (distances[i] < 4001) // Chỉ ghi các cung có vật cản (dưới ngưỡng tối đa 4000cm)
+        {
+            m_fileStream << timestampUsec << ","
+                         << (int)i << ","
+                         << distances[i] << "\n";
+        }
+    }
+    m_fileStream.flush();
 }
