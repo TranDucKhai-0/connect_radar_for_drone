@@ -1,5 +1,6 @@
 #include "can_bus_manager.hpp"
 #include "mr72_radar.hpp"
+#include "u10_radar.hpp"
 #include "csv_logger.hpp"
 #include "drone_state.hpp"
 #include "thread_safe_queue.hpp"
@@ -117,10 +118,15 @@ void ReadDataFromRadarThread(const std::string &canIface)
 {
     CanBusManager canBus(canIface);
 
-    // Khởi tạo 4 radar với các ID 1, 2, 3, 4
-    MR72Radar radars[4] = {MR72Radar(1), MR72Radar(2), MR72Radar(3), MR72Radar(4)};
+    // Khởi tạo song song cả 2 dòng radar ở 4 vị trí để hỗ trợ cắm-và-chạy (Plug & Play) dựa trên CAN ID khác biệt
+    MR72Radar mr72Radars[4] = {MR72Radar(1), MR72Radar(2), MR72Radar(3), MR72Radar(4)};
+    U10Radar u10Radars[4] = {U10Radar(1), U10Radar(2), U10Radar(3), U10Radar(4)};
+
     for (int i = 0; i < 4; i++)
-        radars[i].Init(0.0f);
+    {
+        mr72Radars[i].Init(0.0f);
+        u10Radars[i].Init(0.0f);
+    }
 
     if (!canBus.Connect())
     {
@@ -134,12 +140,16 @@ void ReadDataFromRadarThread(const std::string &canIface)
     {
         if (canBus.ReadCanFrame(frame))
         {
-            // Đẩy dữ liệu vào Parse của cả 4 radar
+            // Đẩy dữ liệu vào hàm ParseCanFrame của cả 2 loại radar ở tất cả vị trí
             for (int i = 0; i < 4; i++)
             {
-                if (radars[i].ParseCanFrame(frame, 0.0f, 0.0f))
+                if (mr72Radars[i].ParseCanFrame(frame, 0.0f, 0.0f))
                 {
-                    g_queueRelative.Push({i + 1, radars[i].GetObstaclesRelative()});
+                    g_queueRelative.Push({i + 1, mr72Radars[i].GetObstaclesRelative()});
+                }
+                if (u10Radars[i].ParseCanFrame(frame, 0.0f, 0.0f))
+                {
+                    g_queueRelative.Push({i + 1, u10Radars[i].GetObstaclesRelative()});
                 }
             }
         }
