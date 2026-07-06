@@ -48,7 +48,7 @@ bool CsvLogger::Open()
     }
     else
     {
-        m_fileStream << "TimestampUsec,SectorIdx,DistanceCm\n";
+        m_fileStream << "TimestampUsec,SectorIdx,DistanceCm,DroneAlt\n";
     }
     m_fileStream.flush(); // Đẩy ngay xuống đĩa cứng
 
@@ -94,7 +94,7 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
 }
 
 // Ghi thông tin các cung gửi sang FC (được đồng bộ)
-void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances[72])
+void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances[72], float droneAlt)
 {
     if (!m_fileStream.is_open())
         return;
@@ -105,7 +105,8 @@ void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances
         {
             m_fileStream << timestampUsec << ","
                          << (int)i << ","
-                         << distances[i] << "\n";
+                         << distances[i] << ","
+                         << std::fixed << std::setprecision(3) << droneAlt << "\n";
         }
     }
     m_fileStream.flush();

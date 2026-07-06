@@ -566,6 +566,12 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
             {
                 for (const auto &obs : *pLatestFrame)
                 {
+                    // Chỉ xử lý các vật thể có độ cao tương đối so với drone trong khoảng [-2m, 2m]
+                    if (obs.z < -2.0f || obs.z > 2.0f)
+                    {
+                        continue;
+                    }
+
                     float dist_cm = obs.range * 100.0f; // MAVLink yêu cầu đơn vị cm
 
                     // Đổi góc từ radian sang độ
@@ -585,7 +591,7 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
 
                     // Nếu cung này chưa có điểm nào, hoặc điểm hiện tại gần hơn điểm trước đó:
                     // Cập nhật khoảng cách vật cản nhỏ nhất vào cung này.
-                    if (distances[idx] == UINT16_MAX || dist_cm < distances[idx])
+                    if (dist_cm < distances[idx])
                     {
                         distances[idx] = (uint16_t)dist_cm;
                     }
@@ -630,7 +636,8 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
 
             if (isLogging)
             {
-                csvLogger.LogFcDistances(GetCurrentTimestampUsec(), distances);
+                float droneAlt = g_droneState.GetAltitude();
+                csvLogger.LogFcDistances(GetCurrentTimestampUsec(), distances, droneAlt);
             }
 
             mavlink_msg_obstacle_distance_pack(
