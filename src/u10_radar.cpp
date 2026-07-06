@@ -186,7 +186,7 @@ bool U10Radar::_ParsePacket(const uint8_t* pData, size_t length)
                 // Y_frd = X_u10 (hướng sang phải)
                 // Z_frd = -Z_u10 (hướng xuống)
                 obstacleRelative_t obs;
-                obs.id = static_cast<uint8_t>(k);
+                obs.id = -32768; // Gán giá trị int16_t cực tiểu để khi cộng offset ở main.cpp vẫn ra giá trị âm
                 obs.x = yU10;
                 obs.y = xU10;
                 obs.z = -zU10;
