@@ -252,6 +252,7 @@ void DataProcessingThread()
                 // Tạo ID duy nhất bằng cách kết hợp radarId và ID vật thể gốc
                 // Mỗi radar MR72 tối đa có 64 vật cản (ID 0..63)
                 absObs.id = (radarId - 1) * 64 + rel.id;
+                absObs.radar_id = radarId;
 
                 // Bù trừ vận tốc (Vận tốc gốc so với mặt đất)
                 absObs.vx = baseVx + vx;

@@ -22,6 +22,7 @@ typedef struct
 typedef struct
 {
     int16_t id;            // ID của vật cản (do radar cung cấp, -1 nếu không có ID)
+    int16_t radar_id;      // ID của radar phát hiện điểm này (1=Front, 2=Right, 3=Back, 4=Left)
     float x;           // Vị trí tuyệt đối trục x (m)
     float y;           // Vị trí tuyệt đối trục y (m)
     float z;           // Vị trí tuyệt đối trục z (m)

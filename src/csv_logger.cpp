@@ -44,7 +44,7 @@ bool CsvLogger::Open()
     // Ghi Header của file CSV dựa trên loại logger
     if (m_type == LoggerType::RADAR)
     {
-        m_fileStream << "TimestampUsec,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
+        m_fileStream << "TimestampUsec,RadarID,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
     }
     else
     {
@@ -79,6 +79,7 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
         // Ghi các thuộc tính của vật thể ra dạng phân cách bằng dấu phẩy
         m_fileStream << std::fixed << std::setprecision(3)
                      << timestampUsec << ","
+                     << obs.radar_id << ","
                      << obs.x << ","
                      << obs.y << ","
                      << obs.z << ","
