@@ -567,7 +567,7 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
                 for (const auto &obs : *pLatestFrame)
                 {
                     // Chỉ xử lý các vật thể có độ cao tương đối so với drone trong khoảng [-2m, 2m]
-                    if (obs.z < -2.0f || obs.z > 2.0f)
+                    if (std::abs(obs.z) > 2.0f)
                     {
                         continue;
                     }

@@ -138,6 +138,12 @@ bool U10Radar::_ParsePacket(const uint8_t* pData, size_t length)
     uint32_t pointsNum = pData[28] | (pData[29] << 8) | (pData[30] << 16) | (pData[31] << 24);
     uint32_t tlvNum = pData[32] | (pData[33] << 8) | (pData[34] << 16) | (pData[35] << 24);
 
+    // giới hạn xin cấp bộ nhớ
+    if (pointsNum > 1000)
+    {
+        return false;
+    }
+
     std::vector<obstacleRelative_t> newObstacles;
     newObstacles.reserve(pointsNum);
 
