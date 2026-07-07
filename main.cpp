@@ -120,7 +120,7 @@ void ReadDataFromRadarThread(const std::string &canIface)
 
     // Khởi tạo song song cả 2 dòng radar ở 4 vị trí để hỗ trợ cắm-và-chạy (Plug & Play) dựa trên CAN ID khác biệt
     MR72Radar mr72Radars[4] = {MR72Radar(1), MR72Radar(2), MR72Radar(3), MR72Radar(4)};
-    U10Radar u10Radars[4] = {U10Radar(1), U10Radar(2), U10Radar(3), U10Radar(4)};
+    U10Radar u10Radars[4] = {U10Radar(1, 0x0D4), U10Radar(2, 0x0D2), U10Radar(3, 0x0D3), U10Radar(4, 0x0D1)};
 
     for (int i = 0; i < 4; i++)
     {
