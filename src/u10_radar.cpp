@@ -217,15 +217,21 @@ bool U10Radar::_ParsePacket(const uint8_t* pData, size_t length)
 
                 // Lọc nhiễu khoảng cách giống như MR72
                 // Radar ID 1, 3 (Front, Back): khoảng cách 2m - 40m
-                if ((m_id == 1 || m_id == 3) && (obs.range < 2.0f || obs.range > 40.0f))
+                // if ((m_id == 1 || m_id == 3) && (obs.range < 2.0f || obs.range > 40.0f))
+                // {
+                //     continue;
+                // }
+                // // Radar ID 2, 4 (Right, Left): khoảng cách 2m - 20m
+                // else if ((m_id == 2 || m_id == 4) && (obs.range < 2.0f || obs.range > 20.0f))
+                // {
+                //     continue;
+                // }
+
+                 if(obs.range < 2.0f || obs.range > 40.0f)
                 {
                     continue;
                 }
-                // Radar ID 2, 4 (Right, Left): khoảng cách 2m - 20m
-                else if ((m_id == 2 || m_id == 4) && (obs.range < 2.0f || obs.range > 20.0f))
-                {
-                    continue;
-                }
+                
 
                 newObstacles.push_back(obs);
             }

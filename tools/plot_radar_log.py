@@ -64,7 +64,7 @@ if 'Angle' in df.columns and 'Range' in df.columns:
     is_left_right = ((df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)) | \
                     ((df['Angle'] >= -1.963) & (df['Angle'] <= -1.178))
     # Loại bỏ các điểm thuộc radar Trái/Phải có Range >= 20m
-    df = df[~(is_left_right & (df['Range'] >= 20.0))]
+    # df = df[~(is_left_right & (df['Range'] >= 20.0))]
 # =========================================================
 
 t0 = df['TimestampMs'].min()

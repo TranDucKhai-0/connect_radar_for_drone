@@ -120,7 +120,7 @@ void ReadDataFromRadarThread(const std::string &canIface)
 
     // Khởi tạo song song cả 2 dòng radar ở 4 vị trí để hỗ trợ cắm-và-chạy (Plug & Play) dựa trên CAN ID khác biệt
     MR72Radar mr72Radars[4] = {MR72Radar(1), MR72Radar(2), MR72Radar(3), MR72Radar(4)};
-    U10Radar u10Radars[4] = {U10Radar(1, 0x0D4), U10Radar(2, 0x0D2), U10Radar(3, 0x0D3), U10Radar(4, 0x0D1)};
+    U10Radar u10Radars[4] = {U10Radar(1), U10Radar(2), U10Radar(3), U10Radar(4)};
 
     for (int i = 0; i < 4; i++)
     {
@@ -268,27 +268,27 @@ void DataProcessingThread()
                 absObs.range = sqrtf(absObs.x * absObs.x + absObs.y * absObs.y);
 
                 // Chỉ lấy trong FOV và khoảng cách hợp lệ của từng radar tương ứng
-                switch (radarId)
-                {
-                case 1: // Front
-                    if (std::abs(absObs.angle) > 0.3926991 || absObs.range < 2.0f || absObs.range > 40.0f)
-                        continue;
-                    break;
-                case 2: // Right
-                    if (absObs.angle < 1.1780972 || absObs.angle > 1.9634954 || absObs.range < 2.0f || absObs.range > 20.0f)
-                        continue;
-                    break;
-                case 3: // Back
-                    if (std::abs(absObs.angle) < 2.7488935 || absObs.range < 2.0f || absObs.range > 40.0f)
-                        continue;
-                    break;
-                case 4: // Left
-                    if (absObs.angle < -1.9634954 || absObs.angle > -1.1780972 || absObs.range < 2.0f || absObs.range > 20.0f)
-                        continue;
-                    break;
-                default:
-                    break;
-                }
+                // switch (radarId)
+                // {
+                // case 1: // Front
+                //     if (std::abs(absObs.angle) > 0.3926991 || absObs.range < 2.0f || absObs.range > 40.0f)
+                //         continue;
+                //     break;
+                // case 2: // Right
+                //     if (absObs.angle < 1.1780972 || absObs.angle > 1.9634954 || absObs.range < 2.0f || absObs.range > 20.0f)
+                //         continue;
+                //     break;
+                // case 3: // Back
+                //     if (std::abs(absObs.angle) < 2.7488935 || absObs.range < 2.0f || absObs.range > 40.0f)
+                //         continue;
+                //     break;
+                // case 4: // Left
+                //     if (absObs.angle < -1.9634954 || absObs.angle > -1.1780972 || absObs.range < 2.0f || absObs.range > 20.0f)
+                //         continue;
+                //     break;
+                // default:
+                //     break;
+                // }
 
                 newAbsPoints.push_back(absObs);
             }
