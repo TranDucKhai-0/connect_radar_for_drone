@@ -41,84 +41,84 @@ bool U10Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward,
     {
         switch (m_state)
         {
-            case PARSE_STATE_FIND_SYNC:
+        case PARSE_STATE_FIND_SYNC:
+        {
+            if (m_byteBuffer.size() < 8)
             {
-                if (m_byteBuffer.size() < 8)
-                {
-                    isParsing = false;
-                    break;
-                }
-
-                // Tìm Magic Word đồng bộ: 02 01 04 03 06 05 08 07
-                const uint8_t magicWord[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
-                auto it = std::search(m_byteBuffer.begin(), m_byteBuffer.end(), std::begin(magicWord), std::end(magicWord));
-                if (it != m_byteBuffer.end())
-                {
-                    // Đã tìm thấy Magic Word, xóa các byte rác phía trước nó
-                    m_byteBuffer.erase(m_byteBuffer.begin(), it);
-                    m_state = PARSE_STATE_READ_HEADER;
-                }
-                else
-                {
-                    // Không tìm thấy, giữ lại tối đa 7 byte cuối cùng phòng trường hợp Magic Word bị chia cắt giữa các CAN frame
-                    if (m_byteBuffer.size() > 7)
-                    {
-                        m_byteBuffer.erase(m_byteBuffer.begin(), m_byteBuffer.end() - 7);
-                    }
-                    isParsing = false;
-                }
+                isParsing = false;
                 break;
             }
 
-            case PARSE_STATE_READ_HEADER:
+            // Tìm Magic Word đồng bộ: 02 01 04 03 06 05 08 07
+            const uint8_t magicWord[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
+            auto it = std::search(m_byteBuffer.begin(), m_byteBuffer.end(), std::begin(magicWord), std::end(magicWord));
+            if (it != m_byteBuffer.end())
             {
-                if (m_byteBuffer.size() < 16)
+                // Đã tìm thấy Magic Word, xóa các byte rác phía trước nó
+                m_byteBuffer.erase(m_byteBuffer.begin(), it);
+                m_state = PARSE_STATE_READ_HEADER;
+            }
+            else
+            {
+                // Không tìm thấy, giữ lại tối đa 7 byte cuối cùng phòng trường hợp Magic Word bị chia cắt giữa các CAN frame
+                if (m_byteBuffer.size() > 7)
                 {
-                    isParsing = false;
-                    break;
+                    m_byteBuffer.erase(m_byteBuffer.begin(), m_byteBuffer.end() - 7);
                 }
+                isParsing = false;
+            }
+            break;
+        }
 
-                // Lấy độ dài gói tin (bytes 12-15) dạng little-endian từ header
-                uint32_t totalLength = m_byteBuffer[12] |
-                                      (m_byteBuffer[13] << 8) |
-                                      (m_byteBuffer[14] << 16) |
-                                      (m_byteBuffer[15] << 24);
-
-                // Kiểm tra tính hợp lệ sơ bộ của độ dài gói tin
-                // Một gói tin tối thiểu phải chứa header (40 bytes)
-                if (totalLength < 40 || totalLength > 8192)
-                {
-                    // Độ dài không hợp lệ, xóa byte đầu tiên để dịch chuyển và tìm Magic Word tiếp theo
-                    m_byteBuffer.erase(m_byteBuffer.begin());
-                    m_state = PARSE_STATE_FIND_SYNC;
-                }
-                else
-                {
-                    m_expectedTotalLength = totalLength;
-                    m_state = PARSE_STATE_READ_PAYLOAD;
-                }
+        case PARSE_STATE_READ_HEADER:
+        {
+            if (m_byteBuffer.size() < 16)
+            {
+                isParsing = false;
                 break;
             }
 
-            case PARSE_STATE_READ_PAYLOAD:
+            // Lấy độ dài gói tin (bytes 12-15) dạng little-endian từ header
+            uint32_t totalLength = m_byteBuffer[12] |
+                                   (m_byteBuffer[13] << 8) |
+                                   (m_byteBuffer[14] << 16) |
+                                   (m_byteBuffer[15] << 24);
+
+            // Kiểm tra tính hợp lệ sơ bộ của độ dài gói tin
+            // Một gói tin tối thiểu phải chứa header (40 bytes)
+            if (totalLength < 40 || totalLength > 8192)
             {
-                if (m_byteBuffer.size() < m_expectedTotalLength)
-                {
-                    isParsing = false;
-                    break;
-                }
-
-                // Đã nhận đủ toàn bộ gói tin, tiến hành bóc tách dữ liệu
-                if (_ParsePacket(m_byteBuffer.data(), m_expectedTotalLength))
-                {
-                    isFrameParsed = true;
-                }
-
-                // Xóa gói tin đã xử lý khỏi bộ đệm tích lũy
-                m_byteBuffer.erase(m_byteBuffer.begin(), m_byteBuffer.begin() + m_expectedTotalLength);
+                // Độ dài không hợp lệ, xóa byte đầu tiên để dịch chuyển và tìm Magic Word tiếp theo
+                m_byteBuffer.erase(m_byteBuffer.begin());
                 m_state = PARSE_STATE_FIND_SYNC;
+            }
+            else
+            {
+                m_expectedTotalLength = totalLength;
+                m_state = PARSE_STATE_READ_PAYLOAD;
+            }
+            break;
+        }
+
+        case PARSE_STATE_READ_PAYLOAD:
+        {
+            if (m_byteBuffer.size() < m_expectedTotalLength)
+            {
+                isParsing = false;
                 break;
             }
+
+            // Đã nhận đủ toàn bộ gói tin, tiến hành bóc tách dữ liệu
+            if (_ParsePacket(m_byteBuffer.data(), m_expectedTotalLength))
+            {
+                isFrameParsed = true;
+            }
+
+            // Xóa gói tin đã xử lý khỏi bộ đệm tích lũy
+            m_byteBuffer.erase(m_byteBuffer.begin(), m_byteBuffer.begin() + m_expectedTotalLength);
+            m_state = PARSE_STATE_FIND_SYNC;
+            break;
+        }
         }
     }
 
@@ -126,7 +126,7 @@ bool U10Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward,
 }
 
 // Bóc tách dữ liệu từ một gói tin hoàn chỉnh đã tích lũy
-bool U10Radar::_ParsePacket(const uint8_t* pData, size_t length)
+bool U10Radar::_ParsePacket(const uint8_t *pData, size_t length)
 {
     if (length < 40)
     {
@@ -156,14 +156,14 @@ bool U10Radar::_ParsePacket(const uint8_t* pData, size_t length)
             break; // Tránh tràn bộ nhớ
         }
 
-        uint32_t tlvType = pData[tlvIndex] | 
-                           (pData[tlvIndex + 1] << 8) | 
-                           (pData[tlvIndex + 2] << 16) | 
+        uint32_t tlvType = pData[tlvIndex] |
+                           (pData[tlvIndex + 1] << 8) |
+                           (pData[tlvIndex + 2] << 16) |
                            (pData[tlvIndex + 3] << 24);
-                           
-         uint32_t tlvLength = pData[tlvIndex + 4] | 
-                             (pData[tlvIndex + 5] << 8) | 
-                             (pData[tlvIndex + 6] << 16) | 
+
+        uint32_t tlvLength = pData[tlvIndex + 4] |
+                             (pData[tlvIndex + 5] << 8) |
+                             (pData[tlvIndex + 6] << 16) |
                              (pData[tlvIndex + 7] << 24);
 
         if (tlvIndex + 8 + tlvLength > length)
@@ -227,11 +227,15 @@ bool U10Radar::_ParsePacket(const uint8_t* pData, size_t length)
                 //     continue;
                 // }
 
-                 if(obs.range < 2.0f || obs.range > 40.0f)
+                if (obs.range < 2.0f || obs.range > 40.0f)
                 {
                     continue;
                 }
-                
+                // chỉ lấy trong trường nhìn 90 độ ngang
+                else if (obs.angle < -M_PI / 4.0 || obs.angle > M_PI / 4.0)
+                {
+                    continue;
+                }
 
                 newObstacles.push_back(obs);
             }
