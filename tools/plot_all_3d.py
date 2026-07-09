@@ -13,21 +13,21 @@ def main():
         csv_file = sys.argv[1]
 
     if not os.path.exists(csv_file):
-        print(f"Lỗi: Không tìm thấy file {csv_file}")
-        print("Cách dùng: python3 plot_all_3d.py <đường_dẫn_tới_file_csv>")
+        print(f"Error: CSV file not found: {csv_file}")
+        print("Usage: python3 plot_all_3d.py <csv_file_path>")
         sys.exit(1)
 
-    print(f"Đang đọc dữ liệu từ: {csv_file}...")
+    print(f"Reading data from: {csv_file}...")
     try:
         df = pd.read_csv(csv_file)
     except Exception as e:
-        print(f"Lỗi khi đọc file CSV: {e}")
+        print(f"Error reading CSV file: {e}")
         sys.exit(1)
 
-    # Kiểm tra xem có đủ cột cần thiết không
+    # Check if required columns exist
     required_cols = {'X', 'Y', 'DroneAlt'}
     if not required_cols.issubset(df.columns):
-        print(f"Lỗi: File CSV thiếu các cột cần thiết. Yêu cầu có: {required_cols}")
+        print(f"Error: CSV file is missing required columns. Requires: {required_cols}")
         sys.exit(1)
 
     # =========================================================
@@ -62,11 +62,11 @@ def main():
         # df = df[~(is_left_right & (df['Range'] >= 20.0))]
     # =========================================================
 
-    print(f"Đã tải {len(df)} điểm dữ liệu. Đang vẽ 3D...")
+    print(f"Loaded {len(df)} data points. Plotting 3D...")
 
-    # Khởi tạo đồ thị 3D
+    # Initialize 3D plot
     fig = plt.figure(figsize=(10, 8))
-    fig.canvas.manager.set_window_title('Toàn bộ điểm Radar 3D')
+    fig.canvas.manager.set_window_title('All 3D Radar Points')
     
     ax = fig.add_subplot(111, projection='3d')
     ax.set_facecolor('#1e1e2e')
@@ -83,20 +83,34 @@ def main():
         marker='o', 
         s=10, 
         alpha=0.6, 
-        edgecolors='none'
+        edgecolors='none',
+        label='Radar Points'
     )
 
-    # Thêm thanh màu (colorbar) thể hiện độ cao
+    # Draw drone at origin (0, 0, 0)
+    ax.scatter(
+        [0], [0], [0], 
+        color='red', 
+        marker='^', 
+        s=100, 
+        label='Drone Origin (0,0,0)'
+    )
+
+    # Add colorbar for altitude
     cbar = fig.colorbar(scatter, ax=ax, pad=0.1, shrink=0.7)
-    cbar.set_label('Độ cao Drone (m)', color='white')
+    cbar.set_label('Drone Altitude (m)', color='white')
     cbar.ax.yaxis.set_tick_params(color='white')
     plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
 
-    # Trang trí trục
-    ax.set_title('Toàn cảnh vật cản Radar 3D (X, Y, Alt)', color='white', fontsize=14, pad=15)
-    ax.set_xlabel('X - Phía trước (m)', color='#a0a0a0', fontsize=10, labelpad=10)
-    ax.set_ylabel('Y - Bên phải (m)', color='#a0a0a0', fontsize=10, labelpad=10)
-    ax.set_zlabel('Độ cao Drone (m)', color='#a0a0a0', fontsize=10, labelpad=10)
+    # Axis decoration
+    ax.set_title('3D Radar Obstacle Map (X, Y, Alt)', color='white', fontsize=14, pad=15)
+    ax.set_xlabel('X - Forward (m)', color='#a0a0a0', fontsize=10, labelpad=10)
+    ax.set_ylabel('Y - Right (m)', color='#a0a0a0', fontsize=10, labelpad=10)
+    ax.set_zlabel('Drone Altitude (m)', color='#a0a0a0', fontsize=10, labelpad=10)
+    
+    # Legend
+    legend = ax.legend(facecolor='#1e1e2e', edgecolor='#333333', loc='upper left')
+    plt.setp(legend.get_texts(), color='white')
     
     ax.tick_params(colors='#707070', labelsize=9)
     ax.xaxis.pane.fill = False

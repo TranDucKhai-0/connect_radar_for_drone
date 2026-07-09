@@ -43,17 +43,17 @@ def find_log_file():
 
 file_path = find_log_file()
 if not file_path:
-    print("❌ Lỗi: Không tìm thấy file log cubefc_radar_log.csv!")
-    print("Cách dùng:")
-    print("  python3 tools/plot_cubefc_radar_log.py <đường_dẫn_file.csv>")
+    print("❌ Error: cubefc_radar_log.csv log file not found!")
+    print("Usage:")
+    print("  python3 tools/plot_cubefc_radar_log.py <csv_file_path>")
     sys.exit(1)
 
-print(f"📂 Đang đọc dữ liệu từ: {file_path}")
+print(f"📂 Reading data from: {file_path}")
 
 try:
     df = pd.read_csv(file_path)
 except Exception as e:
-    print(f"❌ Lỗi khi đọc file CSV: {e}")
+    print(f"❌ Error reading CSV file: {e}")
     sys.exit(1)
 
 # Chuẩn hoá tên cột (không phân biệt hoa thường)
@@ -71,15 +71,15 @@ df = df.rename(columns=col_mapping)
 
 required_cols = {'TimestampUsec', 'SectorIdx', 'DistanceCm'}
 if not required_cols.issubset(df.columns):
-    print(f"❌ Thiếu cột trong file CSV. Cần có: {required_cols}")
-    print(f"Các cột hiện có: {list(df.columns)}")
+    print(f"❌ Error: Missing columns in CSV file. Required: {required_cols}")
+    print(f"Existing columns: {list(df.columns)}")
     sys.exit(1)
 
-# Loại bỏ các hàng bị khuyết dữ liệu
+# Drop rows with missing data
 df = df.dropna(subset=list(required_cols))
 
 if df.empty:
-    print("⚠️ File CSV không chứa dữ liệu hợp lệ.")
+    print("⚠️ Warning: CSV file contains no valid data.")
     sys.exit(1)
 
 # Sắp xếp theo TimestampUsec
@@ -103,8 +103,8 @@ for ts, group in sorted(grouped):
 
 n_frames = len(frames)
 duration_sec = frames[-1]['t_sec']
-print(f"✅ Đọc thành công {len(df)} hàng dữ liệu, chia làm {n_frames} frames.")
-print(f"⏱️ Tổng thời gian log: {duration_sec:.2f} giây.")
+print(f"✅ Successfully read {len(df)} data rows, split into {n_frames} frames.")
+print(f"⏱️ Total log duration: {duration_sec:.2f} seconds.")
 
 # ---------------------------------------------------------
 # 2. KHỞI TẠO ĐỒ THỊ 1: REAL-TIME INTERACTIVE VISUALIZER
@@ -122,9 +122,9 @@ ax_polar = fig.add_subplot(122, projection='polar', facecolor='#16213e')
 plt.subplots_adjust(bottom=0.22, left=0.08, right=0.92, top=0.90, wspace=0.25)
 
 # Cấu hình phong cách trục Cartesian 2D
-ax_cartesian.set_title('Mô hình vật cản 2D (Hệ trục FRD)', color='white', fontsize=12, pad=10)
-ax_cartesian.set_xlabel('Y - Sang phải [m]', color='#a0a0a0', fontsize=10)
-ax_cartesian.set_ylabel('X - Tiến tới [m]', color='#a0a0a0', fontsize=10)
+ax_cartesian.set_title('2D Obstacle Map (FRD Frame)', color='white', fontsize=12, pad=10)
+ax_cartesian.set_xlabel('Y - Right [m]', color='#a0a0a0', fontsize=10)
+ax_cartesian.set_ylabel('X - Forward [m]', color='#a0a0a0', fontsize=10)
 ax_cartesian.tick_params(colors='#707070', labelsize=8)
 ax_cartesian.grid(True, alpha=0.15, color='#444444')
 
@@ -140,10 +140,10 @@ ax_cartesian.set_ylim(-5, 45)
 ax_cartesian.set_aspect('equal')
 
 # Cấu hình phong cách Polar Plot
-ax_polar.set_title('Phân bố 72-Sector gửi sang FC', color='white', fontsize=12, pad=15)
+ax_polar.set_title('72-Sector Distribution Sent to FC', color='white', fontsize=12, pad=15)
 ax_polar.tick_params(colors='#707070', labelsize=8)
-ax_polar.set_theta_zero_location('N')    # 0° ở phía trước (North/Forward)
-ax_polar.set_theta_direction(-1)         # Chiều kim đồng hồ (CW) - chuẩn FRD
+ax_polar.set_theta_zero_location('N')    # 0° Forward (North)
+ax_polar.set_theta_direction(-1)         # Clockwise (CW) - FRD standard
 ax_polar.grid(True, alpha=0.2, color='#444444')
 ax_polar.set_rmax(40)                    # Max range 40m
 ax_polar.set_rlabel_position(45)
@@ -151,24 +151,24 @@ ax_polar.set_rlabel_position(45)
 # ---------------------------------------------------------
 # CẤU HÌNH WIDGETS ĐIỀU KHIỂN
 # ---------------------------------------------------------
-# Thanh trượt Timeline (Slider)
+# Timeline Slider
 ax_slider = plt.axes([0.15, 0.10, 0.70, 0.03], facecolor='#0f3460')
-slider = Slider(ax_slider, 'Thời gian (s)', 0, n_frames - 1, valinit=0, valstep=1, color='#e94560')
+slider = Slider(ax_slider, 'Time (s)', 0, n_frames - 1, valinit=0, valstep=1, color='#e94560')
 slider.valtext.set_color('white')
 
-# Nút nhấn Play/Pause
+# Play/Pause Button
 ax_play = plt.axes([0.15, 0.04, 0.10, 0.04], facecolor='#0f3460')
 btn_play = Button(ax_play, '▶ Play', color='#e94560', hovercolor='#ff5d7d')
 btn_play.label.set_color('white')
 
-# Nút nhấn Lùi (Back)
+# Back Button
 ax_back = plt.axes([0.27, 0.04, 0.08, 0.04], facecolor='#0f3460')
-btn_back = Button(ax_back, '⏮ Lùi', color='#0f3460', hovercolor='#1b5694')
+btn_back = Button(ax_back, '⏮ Back', color='#0f3460', hovercolor='#1b5694')
 btn_back.label.set_color('white')
 
-# Nút nhấn Tiến (Forward)
+# Forward Button
 ax_fwd = plt.axes([0.37, 0.04, 0.08, 0.04], facecolor='#0f3460')
-btn_fwd = Button(ax_fwd, 'Tiến ⏭', color='#0f3460', hovercolor='#1b5694')
+btn_fwd = Button(ax_fwd, 'Fwd ⏭', color='#0f3460', hovercolor='#1b5694')
 btn_fwd.label.set_color('white')
 
 # Text hiển thị thông tin frame
@@ -242,11 +242,11 @@ def update_plot(val):
     else:
         polar_bars[0] = None
         
-    # Cập nhật thông tin chữ
+    # Update text info
     info_text.set_text(
-        f"⏱️ Thời gian: {t_sec:.2f}s / {duration_sec:.2f}s\n"
+        f"⏱️ Time: {t_sec:.2f}s / {duration_sec:.2f}s\n"
         f"🖼️ Frame: {idx + 1} / {n_frames}\n"
-        f"🔴 Số vật cản: {len(sectors)}"
+        f"🔴 Obstacles: {len(sectors)}"
     )
     
     fig.canvas.draw_idle()
@@ -322,18 +322,18 @@ fig.canvas.mpl_connect('key_press_event', on_key_press)
 # Vẽ frame đầu tiên
 update_plot(0)
 
-# Thêm ghi chú hướng dẫn sử dụng ở dưới cùng
+# Usage shortcut note at the bottom
 fig.text(0.5, 0.015,
-         'Phím tắt: [Space] Play/Pause  |  [←] [→] Lùi/Tiến 1 Frame  |  [Home]/[End] Về Đầu/Cuối  |  Kéo Slider để tua nhanh',
+         'Shortcuts: [Space] Play/Pause  |  [←] [→] Prev/Next Frame  |  [Home]/[End] First/Last  |  Drag Slider to Scrub',
          ha='center', color='#888888', fontsize=9)
 
 # ---------------------------------------------------------
 # 5. KHỞI TẠO ĐỒ THỊ 2: SUMMARY FLIGHT HEATMAP TIMELINE
 # ---------------------------------------------------------
-print("📊 Đang sinh Flight Summary Heatmap...")
+print("📊 Generating Flight Summary Heatmap...")
 
-# Tạo ma trận heatmap kích thước 72 hàng (sectors) x N cột (frames)
-# Giá trị mặc định là NaN (không có vật cản)
+# Create heatmap matrix of size 72 rows (sectors) x N columns (frames)
+# Default value is NaN (no obstacle)
 heatmap_matrix = np.full((72, n_frames), np.nan)
 
 for col_idx, frame in enumerate(frames):
@@ -361,20 +361,20 @@ mesh = ax_heatmap.pcolormesh(
     cmap=cmap, vmin=2.0, vmax=40.0, shading='nearest'
 )
 
-# Thiết lập nhãn và trang trí
-ax_heatmap.set_title('Lịch sử khoảng cách vật cản theo thời gian và góc quét', color='white', fontsize=14, fontweight='bold', pad=15)
-ax_heatmap.set_xlabel('Thời gian bay (giây)', color='white', fontsize=11)
-ax_heatmap.set_ylabel('Góc quét của Sector (độ)', color='white', fontsize=11)
+# Labels and styling
+ax_heatmap.set_title('Obstacle Distance History over Time and Sector Angle', color='white', fontsize=14, fontweight='bold', pad=15)
+ax_heatmap.set_xlabel('Flight Time (seconds)', color='white', fontsize=11)
+ax_heatmap.set_ylabel('Sector Angle (degrees)', color='white', fontsize=11)
 
 ax_heatmap.tick_params(colors='#a0a0a0', labelsize=9)
-ax_heatmap.set_yticks(np.arange(0, 361, 30))  # Mỗi 30 độ đánh dấu một nấc
+ax_heatmap.set_yticks(np.arange(0, 361, 30))  # Tick every 30 degrees
 ax_heatmap.set_ylim(0, 360)
 if len(times) > 1:
     ax_heatmap.set_xlim(times[0], times[-1])
 
-# Thêm thanh chú thích màu sắc
+# Colorbar decoration
 cbar = fig_heatmap.colorbar(mesh, ax=ax_heatmap, pad=0.03, shrink=0.8)
-cbar.set_label('Khoảng cách tới vật cản (m)', color='white', fontsize=10, labelpad=10)
+cbar.set_label('Obstacle Distance (m)', color='white', fontsize=10, labelpad=10)
 cbar.ax.yaxis.set_tick_params(color='white')
 plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')
 

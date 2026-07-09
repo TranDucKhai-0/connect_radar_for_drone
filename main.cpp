@@ -29,6 +29,7 @@
 std::atomic<bool> g_isAppRunning{true};
 DroneState g_droneState;
 std::atomic<bool> g_isSystemActive{false};
+std::atomic<uint8_t> g_fcSystemId{1};
 
 using frameRelative_t = std::vector<obstacleRelative_t>;
 using frameAbsolute_t = std::vector<obstacleAbsolute_t>;
@@ -200,8 +201,8 @@ void DataProcessingThread()
             int radarId = framePair.first;
             frameRelative_t &relativeFrame = framePair.second;
 
-            float vx, vy, alt;
-            g_droneState.GetState(vx, vy, alt);
+            float vx, vy, vz, alt;
+            g_droneState.GetState(vx, vy, vz, alt);
 
             std::vector<obstacleAbsolute_t> newAbsPoints;
             newAbsPoints.reserve(relativeFrame.size());
@@ -321,14 +322,16 @@ void DataProcessingThread()
                     float dvz = pBestMatch->data.vz - new_point.vz;
                     float dist_vel = std::sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
 
+                    float drone_speed = std::sqrt(vx * vx + vy * vy + vz * vz);
                     // Kiểm tra điều kiện "đóng băng" dữ liệu
-                    if (dist_pos < 0.001f && dist_vel < 0.1f)
+                    // Chỉ tăng bộ đếm đóng băng (xóa điểm ma) khi drone đang thực sự di chuyển (tốc độ > 0.3 m/s)
+                    if (dist_pos < 0.0009f && dist_vel < 0.09f && drone_speed > 0.3f)
                     {
                         pBestMatch->frozenCount++;
                     }
                     else
                     {
-                        pBestMatch->frozenCount = 0; // Reset nếu có sự dịch chuyển thực tế
+                        pBestMatch->frozenCount = 0; // Reset nếu drone đứng yên hoặc có sự dịch chuyển thực tế
                     }
 
                     // Tìm thấy điểm cũ khớp ID -> Cập nhật tọa độ và thời gian cập nhật
@@ -539,6 +542,11 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
     std::string logFilePath = logDir + "/cubefc_radar_log.csv";
     CsvLogger csvLogger(logFilePath, LoggerType::FC);
     bool isLogging = false;
+
+    // Ép cấu hình MAVLink 2 trên kênh COMM_2
+    mavlink_status_t *status = mavlink_get_channel_status(MAVLINK_COMM_2);
+    status->flags &= ~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
+
     auto next_wake_time = std::chrono::steady_clock::now();
 
     while (g_isAppRunning)
@@ -555,16 +563,31 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
             mavlink_message_t msg;
 
             // Khởi tạo mảng 72 phần tử đại diện cho 72 cung (mỗi cung 5 độ).
+            // Giá trị mặc định là UINT16_MAX (65535) đại diện cho vùng mù (không phủ sóng cảm biến)
             uint16_t distances[72];
-            // Gán giá trị mặc định là 4001 cho toàn bộ cung
             for (uint8_t i = 0; i < 72; i++)
-                distances[i] = 4001;
+                distances[i] = 65535;
 
             bool isSendFCActive = g_isSystemActive; // Lấy cờ trạng thái hệ thống tại thời điểm này
 
             // Nếu drone đạt độ cao an toàn, bắt đầu phân tích điểm ảnh radar để chèn vào bản tin
             if (isSendFCActive)
             {
+                // Chỉ thiết lập 4001 (Không có vật cản) cho các cung nằm trong FOV quét của 4 radar
+                // Front FOV: ±22.5 độ quanh 0 độ
+                // Right FOV: 90 ± 22.5 độ
+                // Back FOV: 180 ± 22.5 độ
+                // Left FOV: 270 ± 22.5 độ
+                auto setFovClear = [&](int startSector, int endSector) {
+                    for (int i = startSector; i <= endSector; ++i) {
+                        distances[i % 72] = 4001; 
+                    }
+                };
+                setFovClear(68, 76);  // Front (68..71 và 0..4)
+                setFovClear(14, 22);  // Right (70 -> 110 độ)
+                setFovClear(32, 40);  // Back (160 -> 200 độ)
+                setFovClear(50, 58);  // Left (250 -> 290 độ)
+
                 for (const auto &obs : *pLatestFrame)
                 {
                     // Chỉ xử lý các vật thể có độ cao tương đối so với drone trong khoảng [-2m, 2m]
@@ -641,9 +664,10 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
                 csvLogger.LogFcDistances(GetCurrentTimestampUsec(), distances, droneAlt);
             }
 
-            mavlink_msg_obstacle_distance_pack(
-                1, 195, &msg,
-                GetCurrentTimestampUsec(),
+            // Đóng gói bản tin sử dụng MAVLINK_COMM_2, timestamp bằng 0
+            mavlink_msg_obstacle_distance_pack_chan(
+                g_fcSystemId, 195, MAVLINK_COMM_2, &msg,
+                0, // time_usec = 0 để FC tự động đồng bộ thời gian thực nhận
                 MAV_DISTANCE_SENSOR_RADAR,
                 distances,
                 5, // angular_width (5 độ mỗi sector)
@@ -720,6 +744,7 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
             {
                 if (mavlink_parse_char(MAVLINK_COMM_1, buffer[i], &msg, &status))
                 {
+                    g_fcSystemId = msg.sysid; // Cập nhật System ID thực tế của FC
                     if (msg.msgid == MAVLINK_MSG_ID_GLOBAL_POSITION_INT)
                     {
                         mavlink_global_position_int_t gpi;
@@ -732,15 +757,16 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
                             float yawRad = (gpi.hdg / 100.0f) * (M_PI / 180.0f);
                             float vx = gpi.vx / 100.0f;
                             float vy = gpi.vy / 100.0f;
+                            float vz = gpi.vz / 100.0f;
 
                             float forward = vx * cosf(yawRad) + vy * sinf(yawRad);
                             float right = -vx * sinf(yawRad) + vy * cosf(yawRad);
 
-                            g_droneState.Update(forward, right, altM);
+                            g_droneState.Update(forward, right, vz, altM);
                         }
                         else
                         {
-                            g_droneState.Update(0.0f, 0.0f, altM);
+                            g_droneState.Update(0.0f, 0.0f, 0.0f, altM);
                         }
 
                         // Cập nhật cờ hoạt động hệ thống dựa trên độ cao (hysteresis)
