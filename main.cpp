@@ -255,14 +255,18 @@ void DataProcessingThread()
                 absObs.id = (radarId - 1) * 64 + rel.id;
                 absObs.radar_id = radarId;
 
-                // Bù trừ vận tốc (Vận tốc gốc so với mặt đất)
-                absObs.vx = baseVx + vx;
-                absObs.vy = baseVy + vy;
+                // Bù trừ vận tốc (Vận tốc gốc so với mặt đất) - ĐÃ COMMENT (Chỉ xoay về hệ trục chung)
+                // absObs.vx = baseVx + vx;
+                // absObs.vy = baseVy + vy;
+                absObs.vx = baseVx;
+                absObs.vy = baseVy;
                 absObs.vz = rel.vz;
 
-                // Bù trừ trễ thời gian thread ngủ
-                absObs.x = baseX + baseVx * timeDelayThreadSleepSeconds;
-                absObs.y = baseY + baseVy * timeDelayThreadSleepSeconds;
+                // Bù trừ trễ thời gian thread ngủ - ĐÃ COMMENT (Chỉ xoay về hệ trục chung)
+                // absObs.x = baseX + baseVx * timeDelayThreadSleepSeconds;
+                // absObs.y = baseY + baseVy * timeDelayThreadSleepSeconds;
+                absObs.x = baseX;
+                absObs.y = baseY;
                 absObs.z = rel.z;
 
                 // Chuyển sang Polar
@@ -312,27 +316,26 @@ void DataProcessingThread()
                 if (pBestMatch)
                 {
                     // Tính toán chênh lệch tọa độ và vận tốc giữa khung hình cũ và mới
-                    float dx = pBestMatch->data.x - new_point.x;
-                    float dy = pBestMatch->data.y - new_point.y;
-                    float dz = pBestMatch->data.z - new_point.z;
-                    float dist_pos = std::sqrt(dx * dx + dy * dy + dz * dz);
+                    // float dx = pBestMatch->data.x - new_point.x;
+                    // float dy = pBestMatch->data.y - new_point.y;
+                    // float dz = pBestMatch->data.z - new_point.z;
+                    // float dist_pos = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-                    float dvx = pBestMatch->data.vx - new_point.vx;
-                    float dvy = pBestMatch->data.vy - new_point.vy;
-                    float dvz = pBestMatch->data.vz - new_point.vz;
-                    float dist_vel = std::sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
+                    // float dvx = pBestMatch->data.vx - new_point.vx;
+                    // float dvy = pBestMatch->data.vy - new_point.vy;
+                    // float dvz = pBestMatch->data.vz - new_point.vz;
+                    // float dist_vel = std::sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
 
-                    float drone_speed = std::sqrt(vx * vx + vy * vy + vz * vz);
+                    // float drone_speed = std::sqrt(vx * vx + vy * vy + vz * vz);
                     // Kiểm tra điều kiện "đóng băng" dữ liệu
-                    // Chỉ tăng bộ đếm đóng băng (xóa điểm ma) khi drone đang thực sự di chuyển (tốc độ > 0.3 m/s)
-                    if (dist_pos < 0.0009f && dist_vel < 0.09f && drone_speed > 0.3f)
-                    {
-                        pBestMatch->frozenCount++;
-                    }
-                    else
-                    {
-                        pBestMatch->frozenCount = 0; // Reset nếu drone đứng yên hoặc có sự dịch chuyển thực tế
-                    }
+                    // if (dist_pos < 0.0009f && dist_vel < 0.09f && drone_speed > 0.3f)
+                    // {
+                    //     pBestMatch->frozenCount++;
+                    // }
+                    // else
+                    // {
+                    //     pBestMatch->frozenCount = 0; // Reset nếu drone đứng yên hoặc có sự dịch chuyển thực tế
+                    // }
 
                     // Tìm thấy điểm cũ khớp ID -> Cập nhật tọa độ và thời gian cập nhật
                     pBestMatch->data = new_point;
@@ -361,11 +364,11 @@ void DataProcessingThread()
             pAbsFrame->reserve(trackedObjects.size());
             for (const auto &track : trackedObjects)
             {
-                // Chỉ gửi đi các điểm KHÔNG bị đóng băng quá 3 khung hình liên tiếp
-                if (track.frozenCount < NUMBER_FRAME_OUT - 1)
-                {
+                // Chỉ gửi đi các điểm KHÔNG bị đóng băng quá 3 khung hình liên tiếp - ĐÃ COMMENT
+                // if (track.frozenCount < NUMBER_FRAME_OUT - 1)
+                // {
                     pAbsFrame->push_back(track.data);
-                }
+                // }
             }
 
             g_queueLog.Push(pAbsFrame);
