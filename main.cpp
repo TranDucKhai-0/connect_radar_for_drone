@@ -144,10 +144,12 @@ void ReadDataFromRadarThread(const std::string &canIface)
             // Đẩy dữ liệu vào hàm ParseCanFrame của cả 2 loại radar ở tất cả vị trí
             for (int i = 0; i < 4; i++)
             {
+                // Parse dữ liệu từ MR72
                 if (mr72Radars[i].ParseCanFrame(frame, 0.0f, 0.0f))
                 {
                     g_queueRelative.Push({i + 1, mr72Radars[i].GetObstaclesRelative()});
                 }
+                // Parse dữ liệu từ U10
                 if (u10Radars[i].ParseCanFrame(frame, 0.0f, 0.0f))
                 {
                     g_queueRelative.Push({i + 1, u10Radars[i].GetObstaclesRelative()});
@@ -173,13 +175,27 @@ struct trackedObject_t
 // ---------------------------------------------------------
 // THREAD 2: Xử lý Data (Relative + FC State -> Absolute)
 // ---------------------------------------------------------
-void DataProcessingThread()
+void DataProcessingThread(const std::string &logDir, bool forceLog)
 {
     std::pair<int, frameRelative_t> framePair;
     std::vector<trackedObject_t> trackedObjects;
 
     constexpr float timeDelayThreadSleepSeconds = CYCLE_TIME_MS / 1000.0f; // Bù trừ trễ thời gian thread ngủ để tăng độ chính xác khi tính toán bù trừ (s)
     uint32_t lastPushTimeMs = GetTimeBootMs();
+
+    // Logger cho dữ liệu thô nhận được từ các radar
+    CsvLogger rawRadarLogger(logDir + "/raw_radar_log.csv");
+    bool isLogging = false;
+
+    // Nếu chạy chế độ mock/forceLog, bật ghi log ngay từ đầu
+    if (forceLog)
+    {
+        if (rawRadarLogger.Open())
+        {
+            isLogging = true;
+            std::cout << "Force Log mode enabled. Started Raw Radar recording immediately.\n";
+        }
+    }
 
     while (g_isAppRunning)
     {
@@ -192,6 +208,31 @@ void DataProcessingThread()
         {
             SystemdNotifyWatchdog();
             lastWatchdogPingMs = now;
+        }
+
+        // Quản lý trạng thái log tự động dựa trên độ cao nếu không ở chế độ forceLog
+        if (!forceLog)
+        {
+            if (g_isSystemActive)
+            {
+                if (!isLogging)
+                {
+                    if (rawRadarLogger.Open())
+                    {
+                        isLogging = true;
+                        std::cout << "System active. Started Raw Radar recording.\n";
+                    }
+                }
+            }
+            else
+            {
+                if (isLogging)
+                {
+                    rawRadarLogger.Close();
+                    isLogging = false;
+                    std::cout << "System inactive. Stopped Raw Radar recording.\n";
+                }
+            }
         }
 
         // Rút sạch tất cả dữ liệu hiện có trong queue g_queueRelative
@@ -299,6 +340,13 @@ void DataProcessingThread()
                 newAbsPoints.push_back(absObs);
             }
 
+            // Ghi log dữ liệu thô (sau khi xoay hệ trục về drone)
+            if (isLogging)
+            {
+                long long timestampUsec = GetCurrentTimestampUsec();
+                rawRadarLogger.LogObstacles(timestampUsec, newAbsPoints, -alt);
+            }
+
             // Cập nhật tọa độ vật cản vào trackedObjects dựa theo ID duy nhất
             for (auto &new_point : newAbsPoints)
             {
@@ -381,8 +429,13 @@ void DataProcessingThread()
         if (!gotData)
         {
             // Ngủ ngắn nếu hàng đợi trống để tiết kiệm tài nguyên CPU
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+    }
+
+    if (isLogging)
+    {
+        rawRadarLogger.Close();
     }
     std::cout << "DataProcessingThread Exited.\n";
 }
@@ -931,7 +984,7 @@ int main(int argc, char **argv)
 
     // Khởi tạo 6 Threads
     std::thread t1(ReadDataFromRadarThread, canInterface);
-    std::thread t2(DataProcessingThread);
+    std::thread t2(DataProcessingThread, logDir, forceLog);
     std::thread t3(WriteLogThread, logDir, forceLog);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
     std::thread t5(SendDataToFcThread, fcIp, fcPort, logDir, forceLog);

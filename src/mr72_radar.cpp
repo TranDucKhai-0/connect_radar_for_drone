@@ -1,5 +1,6 @@
 #include "mr72_radar.hpp"
 #include <cmath>
+#include <chrono>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -23,23 +24,42 @@ void MR72Radar::Init(float mountingYaw)
 // Phân tích cú pháp khung dữ liệu CAN của MR72 Radar
 bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward, float droneVRight)
 {
-    // Bỏ qua gói STATUS (0x60A), xử lý real-time trên từng gói object (0x60B)
+    static std::chrono::steady_clock::time_point lastTimes[5] = {};
+    bool isFrameParsed = false;
+
+    // Gói trạng thái danh sách vật thể (0x60A) - Bắt đầu chu kỳ đo mới
     if (frame.can_id == (MR72_OBJECT_LIST_STATUS + m_id * 0x10))
     {
-        return false; // Không cần xử lý gì, chỉ dùng để đồng bộ khi nào có gói object mới sẽ đọc dữ liệu
+        // 1. Kiểm tra xem có dữ liệu của chu kỳ trước chưa được gửi đi hoàn chỉnh
+        if (!m_tempObstacles.empty())
+        {
+            m_obstacles = std::move(m_tempObstacles);
+            m_tempObstacles.clear();
+            isFrameParsed = true;
+        }
+        return isFrameParsed;
     }
     // Gói dữ liệu vật thể chung (0x60B)
     else if (frame.can_id == (MR72_OBJECT_GENERAL_INFO + m_id * 0x10))
     {
+        auto now = std::chrono::steady_clock::now();
+        
+        // Tính toán khoảng thời gian từ lần nhận gói 0x60B trước đó
+        auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTimes[m_id]).count();
+        lastTimes[m_id] = now;
+
+        // Nếu khoảng thời gian > 20ms, chứng tỏ đây là một chu kỳ mới
+        // (Dùng làm cơ chế dự phòng cực kỳ robust trong trường hợp gói 0x60A bị mất hoặc không được gửi)
+        if (dt > 20 && !m_tempObstacles.empty())
+        {
+            m_obstacles = std::move(m_tempObstacles);
+            m_tempObstacles.clear();
+            isFrameParsed = true;
+        }
+
         uint8_t sectorNumber = (frame.data[6] >> 3) & 0x03;
-
-        // Theo protocol MR72, (data[6] >> 3) & 0x3 là Sector Number.
-        // Sector 1 là khu vực chính giữa, Sector 2 và 3 là hai bên.
-        // Chỉ lấy vật thể ở Sector 1 (chính giữa) để giảm nhiễu 2 bên
-        if (sectorNumber != 0x02) return false;
-
         obstacleRelative_t obs;
-        obs.id = frame.data[0]; // Giữ nguyên object ID gốc do radar gán, GCS dùng để phân biệt các điểm
+        obs.id = frame.data[0]; // Giữ nguyên object ID gốc do radar gán
 
         // Cấu trúc Byte của thông tin chung vật thể (theo datasheet MR72)
         // Dịch bit để gom lại thành raw value (13 bit, 11 bit...)
@@ -52,27 +72,59 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         obs.x   = distLongRaw * 0.2f - 500.0f;    // X = Khoảng cách dọc (Forward) (m)
         obs.y   = distLatRaw  * 0.2f - 204.6f;    // Y = Khoảng cách ngang (Right) (m)
         obs.z   = 0.0f;                            // MR72 là radar 2D, không đo độ cao Z
-        obs.vx = vrelLongRaw * 0.25f - 128.0f;   // Vận tốc tương đối dọc trục X (m/s)
-        obs.vy = vrelLatRaw  * 0.25f - 64.0f;    // Vận tốc tương đối dọc trục Y (m/s)
-        obs.vz = 0.0f;
+        obs.vx  = vrelLongRaw * 0.25f - 128.0f;   // Vận tốc tương đối dọc trục X (m/s)
+        obs.vy  = vrelLatRaw  * 0.25f - 64.0f;    // Vận tốc tương đối dọc trục Y (m/s)
+        obs.vz  = 0.0f;
 
-        // x,y,z -> range,angle
+        // Tính toán khoảng cách (range) và góc (angle) tương đối trong hệ FRD
         obs.angle = atan2f(obs.y, obs.x); // rad
         obs.range = sqrtf(obs.x * obs.x + obs.y * obs.y); // m
 
-        // lọc bỏ data rác
-        if ((m_id == 1 || m_id == 3) && (obs.range < 2.0f || obs.range > 40.0f)) return false;
-        // Lọc khoảng cách radar ID 2 và 4 trong phạm vi 2.0m - 20.0m
-        else if ((m_id == 2 || m_id == 4) && (obs.range < 2.0f || obs.range > 20.0f)) return false;
+        // Theo tài liệu kỹ thuật của MR72, Sector 2 là khu vực chính giữa (Sector 1 bên trái, Sector 3 bên phải).
+        // Chỉ lấy vật thể ở Sector 2 (chính giữa) để giảm nhiễu từ hai bên sườn.
+        bool isValid = true;
+        if (sectorNumber != 0x02)
+        {
+            isValid = false;
+        }
+        else
+        {
+            // Lọc khoảng cách tùy thuộc vào vị trí lắp đặt của radar (m_id)
+            if (m_id == 1 || m_id == 3) // Front, Back (2m - 40m)
+            {
+                if (obs.range < 2.0f || obs.range > 40.0f)
+                {
+                    isValid = false;
+                }
+            }
+            else if (m_id == 2 || m_id == 4) // Right, Left (2m - 20m)
+            {
+                if (obs.range < 2.0f || obs.range > 20.0f)
+                {
+                    isValid = false;
+                }
+            }
+            else
+            {
+                // Tránh trường hợp m_id bất thường
+                if (obs.range < 2.0f || obs.range > 40.0f)
+                {
+                    isValid = false;
+                }
+            }
+        }
 
-        // Chuyển đổi từ range, angle ngược lại x, y, z
-        obs.x = obs.range * cosf(obs.angle);
-        obs.y = obs.range * sinf(obs.angle);
-        obs.z = 0.0f;
+        if (isValid)
+        {
+            // Đồng bộ tọa độ x, y từ range và angle sau khi lọc nhiễu
+            obs.x = obs.range * cosf(obs.angle);
+            obs.y = obs.range * sinf(obs.angle);
+            obs.z = 0.0f;
 
-        m_obstacles.clear();
-        m_obstacles.push_back(obs); // Ghi nhận vật cản
-        return true;
+            m_tempObstacles.push_back(obs);
+        }
+
+        return isFrameParsed;
     }
 
     return false; // Không thuộc gói tin nào cần thiết

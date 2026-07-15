@@ -77,7 +77,7 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
         // if (obs.range < 2.0f || obs.range > 40.0f) continue;
 
         // Ghi các thuộc tính của vật thể ra dạng phân cách bằng dấu phẩy
-        m_fileStream << std::fixed << std::setprecision(3)
+        m_fileStream << std::fixed << std::setprecision(5)
                      << timestampUsec << ","
                      << obs.radar_id << ","
                      << obs.x << ","
@@ -107,7 +107,7 @@ void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances
             m_fileStream << timestampUsec << ","
                          << (int)i << ","
                          << distances[i] << ","
-                         << std::fixed << std::setprecision(3) << droneAlt << "\n";
+                         << std::fixed << std::setprecision(5) << droneAlt << "\n";
         }
     }
     m_fileStream.flush();
