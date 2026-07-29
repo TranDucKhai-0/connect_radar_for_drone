@@ -6,6 +6,11 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#define ANGLE_LIMIT_FOV_RAD 0.3490658F // 20 độ (rad) - Giới hạn FOV của radar MR72 (±20 độ quanh trục chính giữa)
+
+#define RANGE_LIMIT_MIN 2.0F
+#define RANGE_LIMIT_MAX 40.0F
+
 MR72Radar::MR72Radar(int id)
     : m_id(id), m_mountingYaw(0.0f), m_expectedObstacles(0)
 {
@@ -92,14 +97,14 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
             // Lọc khoảng cách tùy thuộc vào vị trí lắp đặt của radar (m_id)
             if (m_id == 1 || m_id == 3) // Front, Back (2m - 40m)
             {
-                if (obs.range < 2.0f || obs.range > 40.0f)
+                if (obs.range < RANGE_LIMIT_MIN || obs.range > RANGE_LIMIT_MAX)
                 {
                     isValid = false;
                 }
             }
             else if (m_id == 2 || m_id == 4) // Right, Left (2m - 20m)
             {
-                if (obs.range < 2.0f || obs.range > 20.0f)
+                if (obs.range < RANGE_LIMIT_MIN || obs.range > RANGE_LIMIT_MAX/2)
                 {
                     isValid = false;
                 }
@@ -107,12 +112,18 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
             else
             {
                 // Tránh trường hợp m_id bất thường
-                if (obs.range < 2.0f || obs.range > 40.0f)
+                if (obs.range < RANGE_LIMIT_MIN || obs.range > RANGE_LIMIT_MAX)
                 {
                     isValid = false;
                 }
             }
         }
+
+        // Lọc theo góc FOV của từng radar (m_id)
+        if(m_id == 1 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
+            isValid = false;
+        else if (m_id == 2 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
+            isValid = false;
 
         if (isValid)
         {
