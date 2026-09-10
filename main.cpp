@@ -908,10 +908,17 @@ static std::vector<std::string> AutoDetectCP2102Ports()
             continue;
         
         // Đọc idVendor và idProduct từ sysfs
-        // Path: /sys/class/tty/ttyUSBx/device/../idVendor
-        std::string sysfs_base = "/sys/class/tty/" + dev_name + "/device/..";
+        // Path: /sys/class/tty/ttyUSBx/device/../../idVendor
+        std::string sysfs_base = "/sys/class/tty/" + dev_name + "/device/../..";
         std::string vid = ReadSysfsFile(sysfs_base + "/idVendor");
         std::string pid = ReadSysfsFile(sysfs_base + "/idProduct");
+
+        // Dự phòng nếu cấp bậc thư mục USB nông hơn
+        if (vid.empty()) {
+            sysfs_base = "/sys/class/tty/" + dev_name + "/device/..";
+            vid = ReadSysfsFile(sysfs_base + "/idVendor");
+            pid = ReadSysfsFile(sysfs_base + "/idProduct");
+        }
         
         if (vid == "10c4" && pid == "ea60")
         {
