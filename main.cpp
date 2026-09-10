@@ -1376,15 +1376,17 @@ int main(int argc, char **argv)
               << "GCS: " << gcsIp << ":" << gcsPort << "\n"
               << "FC Dest: " << fcIp << ":" << fcPort << "\n"
               << "FC Listen Port: " << localFcListenPort << "\n"
-              << "Log Directory: " << logDir << "\n";
+              << "Log Directory: " << logDir << "\n"
+              << "LRF: Auto-detect mode (CP2102 USB)\n";
 
-    // Khởi tạo 6 Threads
+    // Khởi tạo 7 Threads
     std::thread t1(ReadDataFromRadarThread, canInterface);
     std::thread t2(DataProcessingThread, logDir, forceLog);
     std::thread t3(WriteLogThread, logDir, forceLog);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
     std::thread t5(SendDataToFcThread, fcIp, fcPort, logDir, forceLog);
     std::thread t6(FcListenerThread, localFcListenPort, altMin, altDis);
+    std::thread t7(LaserRangeFinderThread, fcIp, fcPort);
 
     // Join chờ ứng dụng kết thúc
     if (t1.joinable())
@@ -1399,6 +1401,8 @@ int main(int argc, char **argv)
         t5.join();
     if (t6.joinable())
         t6.join();
+    if (t7.joinable())
+        t7.join();
 
     std::cout << "Application successfully terminated.\n";
     return 0;
