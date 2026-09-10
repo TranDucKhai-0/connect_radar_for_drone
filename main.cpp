@@ -1020,19 +1020,232 @@ static int8_t Laser_Linux_TxCallback(uint8_t* data, uint16_t size)
 }
 
 // ---------------------------------------------------------
-// THREAD 7: Xử lý cảm biến LRF (Laser Range Finder) (Cập nhật Drone Alt)
+// THREAD 7: Xử lý cảm biến LRF (Laser Range Finder)
+//           Hoạt động hoàn toàn độc lập với pipeline Radar
+//           Giao tiếp qua USB Serial (CP2102) → MAVLink DISTANCE_SENSOR → FC
 // ---------------------------------------------------------
-void LaserRangeFinderThread()
+void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 {
-    // Khởi tạo handle
+    std::cout << "LRF: Thread started.\n";
 
+    // ── Khởi tạo Laser Handle (y hệt F405: laser_task.c dòng 43-45) ──
+    Laser_Handle_t laser_handle;
+    memset(&laser_handle, 0, sizeof(laser_handle));
+    laser_handle.config.transmit_cb = Laser_Linux_TxCallback;
+    laser_handle.is_initialized = true;
 
-    while (True)
+    // ── Tạo UDP Socket để gửi DISTANCE_SENSOR tới FC (cùng ip:port với Radar) ──
+    struct sockaddr_in fc_addr;
+    int udp_sock = CreateUdpSocket(fcIp, fcPort, fc_addr);
+    if (udp_sock < 0)
     {
-        float lrfAlt = GetLaserRangeFinderAltitude();
-        g_droneState.UpdateAltitude(lrfAlt);
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::cerr << "LRF: Failed to create UDP socket.\n";
+        return;
     }
+
+    // ── Ép MAVLink 2 trên kênh COMM_3 (kênh riêng cho LRF) ──
+    mavlink_status_t* mav_status = mavlink_get_channel_status(MAVLINK_COMM_3);
+    mav_status->flags &= ~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
+
+    // ── Biến trạng thái ──
+    LaserObject_t laser_data;
+    uint8_t rx_buffer[64];  // Buffer kích thước 64 bytes (y hệt F405: LASER_DMA_BUF_SIZE = 64)
+    auto last_send_time = std::chrono::steady_clock::now();
+    auto last_valid_parse_time = std::chrono::steady_clock::now();
+    constexpr int SEND_INTERVAL_MS = 50;  // 20Hz — khuyến cáo ArduPilot cho rangefinder altitude
+
+    // ══════════════════════════════════════════════════════════════
+    // VÒNG LẶP NGOÀI: Auto-detect → Connect → Setup → Read loop
+    // Nếu mất kết nối USB → quay lại đây để dò lại
+    // ══════════════════════════════════════════════════════════════
+    while (g_isAppRunning)
+    {
+        // ── PHASE 1: Auto-detect cổng CP2102 ──
+        // Jetson có thể có nhiều CP2102 (debug, GPS, v.v.)
+        // Thuật toán: Lấy danh sách tất cả CP2102 → thử từng cổng →
+        //             gửi Setup → chờ parse thành công → xác nhận đúng Laser
+        g_laser_serial_fd = -1;
+        std::string connected_port;
+
+        while (g_isAppRunning && g_laser_serial_fd < 0)
+        {
+            std::cout << "LRF: Scanning for CP2102 USB devices...\n";
+            std::vector<std::string> cp2102_ports = AutoDetectCP2102Ports();
+
+            if (cp2102_ports.empty())
+            {
+                std::cerr << "LRF: No CP2102 found. Retrying in 2s...\n";
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+                continue;
+            }
+
+            std::cout << "LRF: Found " << cp2102_ports.size() << " CP2102 port(s). Validating...\n";
+
+            // Thử từng cổng CP2102: mở → cấu hình SF20 → chờ parse thành công
+            for (const auto& port : cp2102_ports)
+            {
+                if (!g_isAppRunning) break;
+
+                std::cout << "LRF: Trying " << port << "...\n";
+                int fd = OpenSerialPort(port);
+                if (fd < 0) continue;
+
+                // Gán fd tạm để TxCallback có thể gửi dữ liệu
+                g_laser_serial_fd = fd;
+
+                // Gửi cấu hình SF20
+                SetupLaserSF20(&laser_handle);
+
+                // Chờ tối đa 2 giây để nhận và parse thành công ít nhất 1 gói
+                bool validated = false;
+                auto validate_start = std::chrono::steady_clock::now();
+
+                while (std::chrono::steady_clock::now() - validate_start < std::chrono::seconds(2))
+                {
+                    if (!g_isAppRunning) break;
+
+                    ssize_t n = read(fd, rx_buffer, sizeof(rx_buffer));
+                    if (n > 0)
+                    {
+                        memset(&laser_data, 0, sizeof(laser_data));
+                        if (Laser_SF20_Parse_DMABuffer(&laser_handle, rx_buffer, (uint16_t)n, &laser_data))
+                        {
+                            if (laser_data.is_valid)
+                            {
+                                validated = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (validated)
+                {
+                    connected_port = port;
+                    std::cout << "LRF: ✓ Laser SF20 confirmed on " << port
+                              << " (distance: " << laser_data.distance_mm << " mm)\n";
+                    break;  // Thoát vòng for — đã tìm đúng cổng
+                }
+                else
+                {
+                    // Cổng này không phải Laser → đóng và thử cổng tiếp theo
+                    std::cout << "LRF: ✗ " << port << " is not Laser SF20.\n";
+                    close(fd);
+                    g_laser_serial_fd = -1;
+                }
+            }
+
+            // Nếu không cổng nào validate thành công → chờ rồi quét lại
+            if (g_laser_serial_fd < 0)
+            {
+                std::cerr << "LRF: No valid Laser found on any CP2102 port. Retrying in 2s...\n";
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+            }
+        }
+
+        if (!g_isAppRunning) break;
+
+        // ── PHASE 2: Đã kết nối thành công — Vào vòng đọc dữ liệu chính ──
+        last_valid_parse_time = std::chrono::steady_clock::now();
+        last_send_time = std::chrono::steady_clock::now();
+
+        std::cout << "LRF: Entering main read loop on " << connected_port << "\n";
+
+        while (g_isAppRunning)
+        {
+            ssize_t n = read(g_laser_serial_fd, rx_buffer, sizeof(rx_buffer));
+
+            if (n > 0)
+            {
+                // Parse dữ liệu nhận được
+                memset(&laser_data, 0, sizeof(laser_data));
+                if (Laser_SF20_Parse_DMABuffer(&laser_handle, rx_buffer, (uint16_t)n, &laser_data))
+                {
+                    if (laser_data.is_valid)
+                    {
+                        last_valid_parse_time = std::chrono::steady_clock::now();
+
+                        // Kiểm tra rate limit 20Hz (50ms) trước khi gửi MAVLink
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            now - last_send_time).count();
+
+                        if (elapsed >= SEND_INTERVAL_MS)
+                        {
+                            last_send_time = now;
+
+                            // Quy đổi mm → cm cho MAVLink DISTANCE_SENSOR
+                            uint16_t distance_cm = (uint16_t)(laser_data.distance_mm / 10);
+
+                            // Đóng gói MAVLink DISTANCE_SENSOR (Message ID #132)
+                            // Cấu hình theo khuyến cáo ArduPilot cho downward rangefinder
+                            mavlink_message_t msg;
+                            float quaternion[4] = {0, 0, 0, 0};  // Không dùng (orientation != CUSTOM)
+
+                            mavlink_msg_distance_sensor_pack_chan(
+                                g_fcSystemId,       // sysid: dùng System ID thực tế của FC
+                                195,                // compid: 195 = MAV_COMP_ID_OBSTACLE_AVOIDANCE (giống Radar)
+                                MAVLINK_COMM_3,     // channel: kênh riêng cho LRF
+                                &msg,
+                                GetTimeBootMs(),    // time_boot_ms
+                                20,                 // min_distance: 20 cm (SF20 min range ~0.2m)
+                                10000,              // max_distance: 10000 cm (SF20 max range 100m)
+                                distance_cm,        // current_distance: khoảng cách hiện tại (cm)
+                                MAV_DISTANCE_SENSOR_LASER,  // type: 0 = LASER
+                                1,                  // id: sensor ID = 1 (phân biệt với radar)
+                                MAV_SENSOR_ROTATION_PITCH_270,  // orientation: 25 = hướng xuống (altitude)
+                                255,                // covariance: UINT8_MAX = không biết
+                                0.0f,               // horizontal_fov: 0 = không biết
+                                0.0f,               // vertical_fov: 0 = không biết
+                                quaternion,         // quaternion: không dùng
+                                0                   // signal_quality: 0 = không biết
+                            );
+
+                            uint8_t mav_buffer[MAVLINK_MAX_PACKET_LEN];
+                            int len = mavlink_msg_to_send_buffer(mav_buffer, &msg);
+                            sendto(udp_sock, mav_buffer, len, 0,
+                                   (struct sockaddr*)&fc_addr, sizeof(fc_addr));
+                        }
+                    }
+                }
+            }
+            else if (n == 0)
+            {
+                // Timeout (VTIME hết 500ms) — không nhận được data
+                auto now = std::chrono::steady_clock::now();
+                auto silent_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_valid_parse_time).count();
+
+                if (silent_ms > 500)
+                {
+                    // Quá 500ms không parse thành công → tái cấu hình (giống F405 timeout logic)
+                    std::cout << "LRF: No data for " << silent_ms << "ms. Reconfiguring SF20...\n";
+                    SetupLaserSF20(&laser_handle);
+                    last_valid_parse_time = std::chrono::steady_clock::now();
+                }
+            }
+            else // n < 0
+            {
+                // Lỗi read() → có thể USB bị rút / disconnect
+                if (errno == EINTR) continue;  // Signal interrupt → thử lại
+
+                std::cerr << "LRF: Serial read error on " << connected_port
+                          << ": " << strerror(errno) << ". Reconnecting...\n";
+                close(g_laser_serial_fd);
+                g_laser_serial_fd = -1;
+                break;  // Thoát vòng while trong → quay lại PHASE 1 auto-detect
+            }
+        }
+    }
+
+    // ── PHASE 3: Cleanup ──
+    if (g_laser_serial_fd >= 0)
+    {
+        close(g_laser_serial_fd);
+        g_laser_serial_fd = -1;
+    }
+    close(udp_sock);
+    std::cout << "LaserRangeFinderThread Exited.\n";
 }
 
 void PrintUsage()
