@@ -1003,8 +1003,8 @@ static void SetupLaserSF20(Laser_Handle_t* handle)
     Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_MEDIAN_ENABLE, 25, SF20_FILTER_ENABLE);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // Bước 4: Kích hoạt Stream khoảng cách mm (Command 30, giá trị 6)
-    Laser_SF20_Set_StreamMode(handle, SF20_STREAM_DISTANCE_MM);
+    // Bước 4: Kích hoạt Stream khoảng cách cm (Command 30, giá trị 5)
+    Laser_SF20_Set_StreamMode(handle, SF20_STREAM_DISTANCE_CM);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
 
@@ -1123,7 +1123,7 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 {
                     connected_port = port;
                     std::cout << "LRF: ✓ Laser SF20 confirmed on " << port
-                              << " (distance: " << laser_data.distance_mm << " mm)\n";
+                              << " (distance: " << laser_data.distance_cm << " cm)\n";
                     break;  // Thoát vòng for — đã tìm đúng cổng
                 }
                 else
@@ -1174,8 +1174,8 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                         {
                             last_send_time = now;
 
-                            // Quy đổi mm → cm cho MAVLink DISTANCE_SENSOR
-                            uint16_t distance_cm = (uint16_t)(laser_data.distance_mm / 10);
+                            // Trích xuất trực tiếp distance_cm (đã cấu hình Stream CM)
+                            uint16_t distance_cm = (uint16_t)laser_data.distance_cm;
 
                             // Đóng gói MAVLink DISTANCE_SENSOR (Message ID #132)
                             // Cấu hình theo khuyến cáo ArduPilot cho downward rangefinder
