@@ -1260,6 +1260,18 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                     }
                 }
             }
+            else if (n == 0)
+            {
+                // Kiểm tra xem thiết bị vật lý (file device node) còn tồn tại không
+                // Nếu CP2102 bị reset đột ngột hoặc rút ra, node /dev/ttyUSBx sẽ bị mất
+                if (access(connected_port.c_str(), F_OK) != 0)
+                {
+                    std::cerr << "LRF: CP2102 disconnected (" << connected_port << " missing). Reconnecting...\n";
+                    close(g_laser_serial_fd);
+                    g_laser_serial_fd = -1;
+                    break;
+                }
+            }
             else if (n < 0)
             {
                 // Lỗi read() → có thể USB bị rút / disconnect
