@@ -4,6 +4,7 @@
 #include "csv_logger.hpp"
 #include "drone_state.hpp"
 #include "thread_safe_queue.hpp"
+#include "laser_driver.h"
 
 #include <iostream>
 #include <chrono>
@@ -18,6 +19,15 @@
 #include <sys/un.h>
 #include <cstring>
 #include <algorithm>
+
+// ---------- Laser Range Finder (LRF) ----------
+extern "C" {
+#include "laser_driver.h"
+}
+#include <fcntl.h>              // open(), O_RDWR, O_NOCTTY, O_NONBLOCK
+#include <termios.h>            // struct termios, cfsetispeed, tcsetattr
+#include <dirent.h>             // opendir(), readdir()
+#include <cerrno>               // errno
 
 #define NUMBER_FRAME_OUT 3 // số khung hình liên tiếp điểm ma xuất hiện 
 
@@ -39,6 +49,9 @@ ThreadSafeQueue<std::pair<int, frameRelative_t>> g_queueRelative;
 ThreadSafeQueue<sharedFrameAbsolute_t> g_queueLog;
 ThreadSafeQueue<sharedFrameAbsolute_t> g_queueGcs;
 ThreadSafeQueue<sharedFrameAbsolute_t> g_queueFc;
+
+// ---------- LRF Global ----------
+static int g_laser_serial_fd = -1;  // File descriptor của Serial port, chỉ Thread LRF truy cập
 
 void SignalHandler(int signum)
 {
@@ -852,6 +865,174 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
     }
     close(sock);
     std::cout << "FcListenerThread Exited.\n";
+}
+
+// ---------------------------------------------------------
+// LRF Helper: Đọc nội dung file sysfs, trả về string đã trim
+// ---------------------------------------------------------
+static std::string ReadSysfsFile(const std::string& path)
+{
+    std::string result;
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return result;
+    
+    char buf[64];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    
+    if (n > 0) {
+        buf[n] = '\0';
+        result = buf;
+        // Trim trailing whitespace/newline
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r' || result.back() == ' '))
+            result.pop_back();
+    }
+    return result;
+}
+
+// ---------------------------------------------------------
+// LRF Helper: Quét /dev/ttyUSB*, trả về danh sách tất cả
+//             cổng có VID:PID khớp CP2102 (10C4:EA60)
+// ---------------------------------------------------------
+static std::vector<std::string> AutoDetectCP2102Ports()
+{
+    std::vector<std::string> found_ports;
+    
+    for (int i = 0; i <= 9; i++)
+    {
+        std::string dev_name = "ttyUSB" + std::to_string(i);
+        std::string dev_path = "/dev/" + dev_name;
+        
+        // Kiểm tra device node tồn tại
+        if (access(dev_path.c_str(), F_OK) != 0)
+            continue;
+        
+        // Đọc idVendor và idProduct từ sysfs
+        // Path: /sys/class/tty/ttyUSBx/device/../idVendor
+        std::string sysfs_base = "/sys/class/tty/" + dev_name + "/device/..";
+        std::string vid = ReadSysfsFile(sysfs_base + "/idVendor");
+        std::string pid = ReadSysfsFile(sysfs_base + "/idProduct");
+        
+        if (vid == "10c4" && pid == "ea60")
+        {
+            found_ports.push_back(dev_path);
+        }
+    }
+    
+    return found_ports;
+}
+
+// ---------------------------------------------------------
+// LRF Helper: Mở và cấu hình Serial Port (115200, 8N1, Raw)
+// Cấu hình y hệt dự án F405: 115200 baud, 8 data bits,
+// No parity, 1 stop bit, No flow control
+// VMIN=0, VTIME=5 → read() timeout 500ms (khớp F405 timeout)
+// ---------------------------------------------------------
+static int OpenSerialPort(const std::string& port)
+{
+    int fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+    if (fd < 0)
+    {
+        std::cerr << "LRF: Failed to open " << port << ": " << strerror(errno) << "\n";
+        return -1;
+    }
+    
+    // Xóa flag O_NONBLOCK sau khi open thành công (chuyển về blocking + timeout)
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    
+    struct termios tty;
+    memset(&tty, 0, sizeof(tty));
+    
+    if (tcgetattr(fd, &tty) != 0)
+    {
+        std::cerr << "LRF: tcgetattr failed: " << strerror(errno) << "\n";
+        close(fd);
+        return -1;
+    }
+    
+    // Cấu hình Raw mode
+    cfmakeraw(&tty);
+    
+    // Baud rate 115200 (y hệt F405: huart4.Init.BaudRate = 115200)
+    cfsetispeed(&tty, B115200);
+    cfsetospeed(&tty, B115200);
+    
+    // 8N1, No flow control (y hệt F405: 8B, NO_PARITY, 1 STOP, NO_HWCONTROL)
+    tty.c_cflag &= ~PARENB;        // No parity
+    tty.c_cflag &= ~CSTOPB;        // 1 stop bit
+    tty.c_cflag &= ~CSIZE;
+    tty.c_cflag |= CS8;            // 8 data bits
+    tty.c_cflag &= ~CRTSCTS;       // No hardware flow control
+    tty.c_cflag |= CLOCAL | CREAD; // Enable receiver, ignore modem control
+    
+    // Timeout: VMIN=0, VTIME=5 → read() trả về sau 500ms nếu không có data
+    // Khớp với F405: osThreadFlagsWait(..., 500) timeout 500ms
+    tty.c_cc[VMIN]  = 0;
+    tty.c_cc[VTIME] = 5;  // 5 * 100ms = 500ms
+    
+    if (tcsetattr(fd, TCSANOW, &tty) != 0)
+    {
+        std::cerr << "LRF: tcsetattr failed: " << strerror(errno) << "\n";
+        close(fd);
+        return -1;
+    }
+    
+    // Flush bộ đệm input/output
+    tcflush(fd, TCIOFLUSH);
+    
+    return fd;
+}
+
+// ---------------------------------------------------------
+// LRF Helper: Cấu hình Laser SF20 — COPY 1:1 từ dự án F405
+// Tham chiếu: PhaseOne_Controller_F405/Component/Laser_Driver/Src/laser_task.c
+// Hàm Setup_SF20() dòng 89-106
+// ---------------------------------------------------------
+static void SetupLaserSF20(Laser_Handle_t* handle)
+{
+    // Bước 1: Gửi Handshake — nhận diện cổng (Command 0: Product Name)
+    Laser_SF20_Send_Handshake(handle);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    
+    // Bước 2: Chỉ xuất 1 trường: First Return Median Filtered (Bit 2)
+    Laser_SF20_Set_DistanceOutput(handle, SF20_OUT_FIRST_FILTERED);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    
+    // Bước 3: Bật Median Filter, kích thước cửa sổ = 25
+    Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_MEDIAN_ENABLE, 25, SF20_FILTER_ENABLE);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    
+    // Bước 4: Kích hoạt Stream khoảng cách mm (Command 30, giá trị 6)
+    Laser_SF20_Set_StreamMode(handle, SF20_STREAM_DISTANCE_MM);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+}
+
+// ---------------------------------------------------------
+// LRF Callback: Gửi dữ liệu xuống UART (thay thế HAL_UART_Transmit của F405)
+// Được gọi bởi các hàm Laser_SF20_xxx() trong driver C
+// ---------------------------------------------------------
+static int8_t Laser_Linux_TxCallback(uint8_t* data, uint16_t size)
+{
+    if (g_laser_serial_fd < 0) return -1;
+    ssize_t written = write(g_laser_serial_fd, data, size);
+    return (written == (ssize_t)size) ? 0 : -1;
+}
+
+// ---------------------------------------------------------
+// THREAD 7: Xử lý cảm biến LRF (Laser Range Finder) (Cập nhật Drone Alt)
+// ---------------------------------------------------------
+void LaserRangeFinderThread()
+{
+    // Khởi tạo handle
+
+
+    while (True)
+    {
+        float lrfAlt = GetLaserRangeFinderAltitude();
+        g_droneState.UpdateAltitude(lrfAlt);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 }
 
 void PrintUsage()
