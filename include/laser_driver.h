@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SF20_START_BYTE     0xAA   // Start Byte cố định của gói binary lwNx
 
 /**
@@ -30,7 +34,7 @@ typedef enum {
 typedef enum {
     SF20_OUT_FIRST_RAW       = (1U << 0),  // Bit 0: First return raw
     SF20_OUT_FIRST_CLOSEST   = (1U << 1),  // Bit 1: First return closest
-    SF20_OUT_FIRST_FILTERED  = (1U << 2),  // Bit 2: First return median (Filtered)
+    SF20_OUT_FIRST_FILTERED  = (1U << 2),  // Bit 2: First return (Filtered)
     SF20_OUT_FIRST_FURTHEST  = (1U << 3),  // Bit 3: First return furthest
     SF20_OUT_FIRST_STRENGTH  = (1U << 4),  // Bit 4: First return strength (%)
     SF20_OUT_LAST_RAW        = (1U << 5),  // Bit 5: Last return raw
@@ -113,5 +117,9 @@ void Laser_SF20_Set_StreamMode(Laser_Handle_t *handle, uint32_t stream_mode);
 
 void Laser_SF20_Set_DistanceOutput(Laser_Handle_t *handle, uint32_t mask);
 void Laser_SF20_Set_Filter_Mode(Laser_Handle_t *handle, SF20_CmdID_t filterMode, uint32_t filterSize, SF20_FilterState_t state);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // LASER_DRIVER_H
