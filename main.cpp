@@ -1056,7 +1056,9 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 
     // ── Biến trạng thái ──
     LaserObject_t laser_data;
-    uint8_t rx_buffer[64];  // Buffer kích thước 64 bytes (y hệt F405: LASER_DMA_BUF_SIZE = 64)
+    uint8_t circular_buf[256]; // Bộ đệm vòng mô phỏng DMA
+    int circular_head = 0;
+    
     auto last_send_time = std::chrono::steady_clock::now();
     auto last_valid_parse_time = std::chrono::steady_clock::now();
     constexpr int SEND_INTERVAL_MS = 50;  // 20Hz — khuyến cáo ArduPilot cho rangefinder altitude
@@ -1106,16 +1108,32 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 // Chờ tối đa 2 giây để nhận và parse thành công ít nhất 1 gói
                 bool validated = false;
                 auto validate_start = std::chrono::steady_clock::now();
+                
+                memset(circular_buf, 0, sizeof(circular_buf));
+                circular_head = 0;
 
                 while (std::chrono::steady_clock::now() - validate_start < std::chrono::seconds(2))
                 {
                     if (!g_isAppRunning) break;
 
-                    ssize_t n = read(fd, rx_buffer, sizeof(rx_buffer));
+                    uint8_t temp[64];
+                    ssize_t n = read(fd, temp, sizeof(temp));
                     if (n > 0)
                     {
+                        // Đưa vào circular buffer
+                        for (ssize_t i = 0; i < n; i++) {
+                            circular_buf[circular_head] = temp[i];
+                            circular_head = (circular_head + 1) % sizeof(circular_buf);
+                        }
+
+                        // Trải phẳng buffer để parse (byte mới nhất nằm ở cuối)
+                        uint8_t linear_buf[256];
+                        for (int i = 0; i < 256; i++) {
+                            linear_buf[i] = circular_buf[(circular_head + i) % 256];
+                        }
+
                         memset(&laser_data, 0, sizeof(laser_data));
-                        if (Laser_SF20_Parse_DMABuffer(&laser_handle, rx_buffer, (uint16_t)n, &laser_data))
+                        if (Laser_SF20_Parse_DMABuffer(&laser_handle, linear_buf, 256, &laser_data))
                         {
                             if (laser_data.is_valid)
                             {
@@ -1156,17 +1174,33 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
         last_valid_parse_time = std::chrono::steady_clock::now();
         last_send_time = std::chrono::steady_clock::now();
 
+        memset(circular_buf, 0, sizeof(circular_buf));
+        circular_head = 0;
+
         std::cout << "LRF: Entering main read loop on " << connected_port << "\n";
 
         while (g_isAppRunning)
         {
-            ssize_t n = read(g_laser_serial_fd, rx_buffer, sizeof(rx_buffer));
+            uint8_t temp[64];
+            ssize_t n = read(g_laser_serial_fd, temp, sizeof(temp));
 
             if (n > 0)
             {
+                // Đưa vào circular buffer
+                for (ssize_t i = 0; i < n; i++) {
+                    circular_buf[circular_head] = temp[i];
+                    circular_head = (circular_head + 1) % sizeof(circular_buf);
+                }
+
+                // Trải phẳng buffer để parse (byte mới nhất nằm ở cuối)
+                uint8_t linear_buf[256];
+                for (int i = 0; i < 256; i++) {
+                    linear_buf[i] = circular_buf[(circular_head + i) % 256];
+                }
+
                 // Parse dữ liệu nhận được
                 memset(&laser_data, 0, sizeof(laser_data));
-                if (Laser_SF20_Parse_DMABuffer(&laser_handle, rx_buffer, (uint16_t)n, &laser_data))
+                if (Laser_SF20_Parse_DMABuffer(&laser_handle, linear_buf, 256, &laser_data))
                 {
                     if (laser_data.is_valid)
                     {
