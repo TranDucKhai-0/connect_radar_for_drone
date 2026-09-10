@@ -1002,12 +1002,14 @@ static void SetupLaserSF20(Laser_Handle_t* handle)
     Laser_SF20_Send_Handshake(handle);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // Bước 2: Chỉ xuất 1 trường: First Return Median Filtered (Bit 2)
+    // Bước 2: Chỉ xuất 1 trường: First Return Filtered (Bit 2)
     Laser_SF20_Set_DistanceOutput(handle, SF20_OUT_FIRST_FILTERED);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // Bước 3: Bật Median Filter, kích thước cửa sổ = 25
-    Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_MEDIAN_ENABLE, 25, SF20_FILTER_ENABLE);
+    // Bước 3: Bật  Filter
+    Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_MEDIAN_ENABLE, 8, SF20_FILTER_ENABLE);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_SMOOTHING_ENABLE, 78, SF20_FILTER_ENABLE);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
     // Bước 4: Kích hoạt Stream khoảng cách cm (Command 30, giá trị 5)
@@ -1220,7 +1222,7 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 
                             // In log khoảng cách mỗi 500ms (2Hz) ra terminal để tiện theo dõi
                             static auto last_log_time = std::chrono::steady_clock::now();
-                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 500)
+                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 50)
                             {
                                 std::cout << "LRF: Distance = " << distance_cm << " cm\n";
                                 last_log_time = now;
@@ -1258,22 +1260,7 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                     }
                 }
             }
-            else if (n == 0)
-            {
-                // Timeout (VTIME hết 500ms) — không nhận được data
-                auto now = std::chrono::steady_clock::now();
-                auto silent_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - last_valid_parse_time).count();
-
-                if (silent_ms > 500)
-                {
-                    // Quá 500ms không parse thành công → tái cấu hình (giống F405 timeout logic)
-                    std::cout << "LRF: No data for " << silent_ms << "ms. Reconfiguring SF20...\n";
-                    SetupLaserSF20(&laser_handle);
-                    last_valid_parse_time = std::chrono::steady_clock::now();
-                }
-            }
-            else // n < 0
+            else if (n < 0)
             {
                 // Lỗi read() → có thể USB bị rút / disconnect
                 if (errno == EINTR) continue;  // Signal interrupt → thử lại
@@ -1283,6 +1270,23 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 close(g_laser_serial_fd);
                 g_laser_serial_fd = -1;
                 break;  // Thoát vòng while trong → quay lại PHASE 1 auto-detect
+            }
+
+            // Kiểm tra timeout: Quá 1000ms không nhận được bản tin hợp lệ
+            // Bất kể n = 0 (mất kết nối vật lý laser) hay n > 0 (laser gửi data rác/sai định dạng)
+            auto now = std::chrono::steady_clock::now();
+            auto silent_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_valid_parse_time).count();
+
+            if (silent_ms > 1000)
+            {
+                std::cout << "LRF: No valid data for " << silent_ms << "ms. Reconfiguring SF20...\n";
+                SetupLaserSF20(&laser_handle);
+                last_valid_parse_time = std::chrono::steady_clock::now();
+                
+                // Flush bộ đệm vòng để xóa rác (tránh kẹt parse dữ liệu cũ)
+                memset(circular_buf, 0, sizeof(circular_buf));
+                circular_head = 0;
             }
         }
     }
