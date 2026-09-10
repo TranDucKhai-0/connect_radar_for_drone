@@ -1181,8 +1181,16 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                         {
                             last_send_time = now;
 
-                            // Trích xuất trực tiếp distance_cm (đã cấu hình Stream CM)
+                            // Quy đổi mm → cm cho MAVLink DISTANCE_SENSOR
                             uint16_t distance_cm = (uint16_t)laser_data.distance_cm;
+
+                            // In log khoảng cách mỗi 500ms (2Hz) ra terminal để tiện theo dõi
+                            static auto last_log_time = std::chrono::steady_clock::now();
+                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 500)
+                            {
+                                std::cout << "LRF: Distance = " << distance_cm << " cm\n";
+                                last_log_time = now;
+                            }
 
                             // Đóng gói MAVLink DISTANCE_SENSOR (Message ID #132)
                             // Cấu hình theo khuyến cáo ArduPilot cho downward rangefinder
