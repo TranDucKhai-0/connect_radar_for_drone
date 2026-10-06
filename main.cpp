@@ -998,21 +998,21 @@ static int OpenSerialPort(const std::string& port)
 // ---------------------------------------------------------
 static void SetupLaserSF20(Laser_Handle_t* handle)
 {
-    // Bước 1: Gửi Handshake — nhận diện cổng (Command 0: Product Name)
+    // Gửi Handshake — nhận diện cổng (Command 0: Product Name)
     Laser_SF20_Send_Handshake(handle);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // Bước 2: Chỉ xuất 1 trường: First Return Filtered (Bit 2)
-    Laser_SF20_Set_DistanceOutput(handle, SF20_OUT_FIRST_FILTERED);
+    // Xuất kết hợp Last Return Filtered (Bit 7) và First Return Strength (Bit 4)
+    Laser_SF20_Set_DistanceOutput(handle, SF20_OUT_LAST_FILTERED | SF20_OUT_FIRST_STRENGTH);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // Bước 3: Bật  Filter
+    // Bật  Filter
     Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_MEDIAN_ENABLE, 8, SF20_FILTER_ENABLE);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     Laser_SF20_Set_Filter_Mode(handle, SF20_CMD_SMOOTHING_ENABLE, 78, SF20_FILTER_ENABLE);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // Bước 4: Kích hoạt Stream khoảng cách cm (Command 30, giá trị 5)
+    // Kích hoạt Stream khoảng cách cm (Command 30, giá trị 5)
     Laser_SF20_Set_StreamMode(handle, SF20_STREAM_DISTANCE_CM);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
@@ -1026,6 +1026,17 @@ static int8_t Laser_Linux_TxCallback(uint8_t* data, uint16_t size)
     if (g_laser_serial_fd < 0) return -1;
     ssize_t written = write(g_laser_serial_fd, data, size);
     return (written == (ssize_t)size) ? 0 : -1;
+}
+
+// ---------------------------------------------------------
+// LRF Helper: Convert SF20 Strength (%) → MAVLink signal_quality (0-100)
+// MAVLink spec: 0 = unknown, 1 = worst, 100 = best
+// ---------------------------------------------------------
+static uint8_t ConvertStrengthToQuality(int16_t strength_raw)
+{
+    if (strength_raw <= 0) return 0;
+    if (strength_raw >= 100) return 100;
+    return static_cast<uint8_t>(strength_raw);
 }
 
 // ---------------------------------------------------------
@@ -1219,12 +1230,13 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 
                             // Quy đổi mm → cm cho MAVLink DISTANCE_SENSOR
                             uint16_t distance_cm = (uint16_t)laser_data.distance_cm;
+                            uint8_t signal_quality = ConvertStrengthToQuality(laser_data.signal_strength_raw);
 
                             // In log khoảng cách mỗi 500ms (2Hz) ra terminal để tiện theo dõi
                             static auto last_log_time = std::chrono::steady_clock::now();
                             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 50)
                             {
-                                std::cout << "LRF: Distance = " << distance_cm << " cm\n";
+                                std::cout << "LRF: Distance = " << distance_cm << " cm, Quality = " << (int)signal_quality << "%\n";
                                 last_log_time = now;
                             }
 
@@ -1249,7 +1261,7 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                                 0.0f,               // horizontal_fov: 0 = không biết
                                 0.0f,               // vertical_fov: 0 = không biết
                                 quaternion,         // quaternion: không dùng
-                                0                   // signal_quality: 0 = không biết
+                                signal_quality      // signal_quality: convert từ SF20 First Return Strength (0-100)
                             );
 
                             uint8_t mav_buffer[MAVLINK_MAX_PACKET_LEN];

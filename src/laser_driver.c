@@ -166,25 +166,48 @@ bool Laser_SF20_Parse_DMABuffer(Laser_Handle_t *handle, const uint8_t *buf, uint
                                          ((uint32_t)buf[i + 6] << 16) |
                                          ((uint32_t)buf[i + 7] << 24));
 
-            out_data->distance_mm = dist_raw;
-            out_data->distance_m  = (float)dist_raw * 0.001f;
-            out_data->command_id  = cmd_id;
-            out_data->is_valid    = true;
+            out_data->distance_mm         = dist_raw;
+            out_data->distance_m          = (float)dist_raw * 0.001f;
+            out_data->signal_strength_raw = 0;
+            out_data->command_id          = cmd_id;
+            out_data->is_valid            = true;
             return true; // Parse thành công gói tin mới nhất
         }
         else if (cmd_id == SF20_CMD_DIST_CM)
         {
-            // Bản tin 44 (cm) cần ít nhất 3 bytes Payload (1B Cmd + 2B int16)
-            if (payload_len < 3) continue;
+            if (payload_len >= 5)
+            {
+                // Multi-field: bit 4 (First Strength) + bit 7 (Last Filtered)
+                // Thứ tự theo bit index tăng dần:
+                //   Trường 1 (bit 4): First Strength (int16_t, offset [i+4..i+5])
+                //   Trường 2 (bit 7): Last Filtered distance (int16_t, offset [i+6..i+7])
+                int16_t strength_raw = (int16_t)((uint16_t)buf[i + 4] |
+                                              ((uint16_t)buf[i + 5] << 8));
 
-            int16_t dist_raw = (int16_t)((uint16_t)buf[i + 4] |
-                                         ((uint16_t)buf[i + 5] << 8));
+                int16_t dist_raw = (int16_t)((uint16_t)buf[i + 6] |
+                                              ((uint16_t)buf[i + 7] << 8));
 
-            out_data->distance_cm = dist_raw;
-            out_data->distance_m  = (float)dist_raw * 0.01f;
-            out_data->command_id  = cmd_id;
-            out_data->is_valid    = true;
-            return true; // Parse thành công gói tin mới nhất
+                out_data->distance_cm         = dist_raw;
+                out_data->distance_m          = (float)dist_raw * 0.01f;
+                out_data->signal_strength_raw = strength_raw;
+                out_data->command_id          = cmd_id;
+                out_data->is_valid            = true;
+                return true; // Parse thành công gói tin mới nhất
+            }
+            else if (payload_len >= 3)
+            {
+                // Single-field fallback (tương thích ngược)
+                int16_t dist_raw = (int16_t)((uint16_t)buf[i + 4] |
+                                              ((uint16_t)buf[i + 5] << 8));
+
+                out_data->distance_cm         = dist_raw;
+                out_data->distance_m          = (float)dist_raw * 0.01f;
+                out_data->signal_strength_raw = 0;
+                out_data->command_id          = cmd_id;
+                out_data->is_valid            = true;
+                return true; // Parse thành công gói tin mới nhất
+            }
+            continue;
         }
     }
 

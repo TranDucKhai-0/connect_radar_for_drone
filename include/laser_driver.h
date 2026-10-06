@@ -65,6 +65,7 @@ typedef struct {
     int32_t  distance_mm;
     int16_t  distance_cm;
     float    distance_m;           // Giá trị quy đổi ra mét (m)
+    int16_t  signal_strength_raw;  // Giá trị Strength thô từ SF20 (%)
     uint8_t  command_id;           // Command ID của bản tin vừa received
     bool     is_valid;             // Cờ báo dữ liệu hợp lệ
 } LaserObject_t;
