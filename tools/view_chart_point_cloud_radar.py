@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Radar Log Visualizer — Vẽ point cloud từ file radar_log.csv
-Hai đồ thị:
-  - Trái:  X, Y  (Cartesian FRD, nhìn từ trên xuống)
-  - Phải:  72-Sector OBSTACLE_DISTANCE (mô phỏng y hệt bản tin gửi FC)
-Thanh trượt ở dưới để kéo qua lại theo TimestampMs.
+Radar Log Visualizer — Point cloud from radar_log.csv
+Two subplots:
+  - Left:  Cartesian 3D (X, Y, DroneAlt) — top-down FRD view
+  - Right: 72-Sector Polar OBSTACLE_DISTANCE (simulates FC message)
+Time-based slider with automatic timestamp interpolation for short/corrupted logs.
 """
 
 import sys
@@ -16,7 +16,7 @@ from matplotlib.patches import Wedge
 from matplotlib.collections import PatchCollection
 
 # ---------------------------------------------------------
-# 1. ĐỌC DỮ LIỆU
+# 1. READ DATA
 # ---------------------------------------------------------
 file_path = sys.argv[1] if len(sys.argv) > 1 else 'radar_log.csv'
 
@@ -24,10 +24,10 @@ try:
     df = pd.read_csv(file_path)
 except FileNotFoundError:
     print(f"Error: File not found: '{file_path}'.")
-    print("Usage: python3 plot_radar_log.py <csv_file_path>")
+    print("Usage: python3 view_chart_point_cloud_radar.py <csv_file_path>")
     sys.exit(1)
 
-required = ['TimestampMs', 'X', 'Y', 'Z', 'Range', 'Angle', 'DroneAlt']
+required = ['TimestampUsec', 'X', 'Y', 'Z', 'Range', 'Angle', 'DroneAlt']
 for col in required:
     if col not in df.columns:
         print(f"Error: Missing column '{col}' in CSV file. Existing columns: {list(df.columns)}")
@@ -35,108 +35,104 @@ for col in required:
 
 df = df.dropna(subset=required)
 
-# =========================================================
-# KHỐI LỌC ĐIỂM RADAR THEO GÓC (Dễ dàng comment để tắt)
-# =========================================================
-# Radar 1: |Angle| <= 0.393 (Front)
-# Radar 2: 1.178 <= Angle <= 1.963 (Right)
-# Radar 3: |Angle| >= 2.749 (Back)
-# Radar 4: -1.963 <= Angle <= -1.178 (Left)
-if 'Angle' not in df.columns and 'X' in df.columns and 'Y' in df.columns:
-    df['Angle'] = np.arctan2(df['Y'], df['X'])
+if len(df) == 0:
+    print("Error: CSV file has no valid data.")
+    sys.exit(1)
 
-if 'Angle' in df.columns:
-    mask_r1 = df['Angle'].abs() <= 0.393
-    mask_r2 = (df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)
-    mask_r3 = df['Angle'].abs() >= 2.749
-    mask_r4 = (df['Angle'] >= -1.963) & (df['Angle'] <= -1.178)
-    df = df[mask_r1 | mask_r2 | mask_r3 | mask_r4]
-# =========================================================
-
-# =========================================================
-# KHỐI LỌC KHOẢNG CÁCH RANGE < 20M CHO RADAR TRÁI/PHẢI (Dễ dàng comment để tắt)
-# =========================================================
-if 'Range' not in df.columns and 'X' in df.columns and 'Y' in df.columns:
-    df['Range'] = np.sqrt(df['X']**2 + df['Y']**2)
-
-if 'Angle' in df.columns and 'Range' in df.columns:
-    # Xác định các điểm thuộc Radar Trái (Radar 4) hoặc Phải (Radar 2)
-    is_left_right = ((df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)) | \
-                    ((df['Angle'] >= -1.963) & (df['Angle'] <= -1.178))
-    # Loại bỏ các điểm thuộc radar Trái/Phải có Range >= 20m
-    # Sort by timestamp to ensure chronological order of points
-    df = df.sort_values('TimestampMs').reset_index(drop=True)
-    t0 = df['TimestampMs'].min()
-
-    n_points = len(df)
-
-    if n_points == 0:
-        print("Error: CSV file has no valid data (after angle filtering).")
-        sys.exit(1)
-
-    print(f"Successfully read {n_points} points, "
-          f"from t=0s to t={(df['TimestampMs'].max() - t0)/1000:.1f}s")
-# =========================================================
+# Sort by timestamp
+df = df.sort_values('TimestampUsec').reset_index(drop=True)
 
 # ---------------------------------------------------------
-# 2. HÀM TÍNH 72-SECTOR (y hệt SendDataToFcThread trong C++)
+# 2. SYNTHESIZE REALISTIC TIMESTAMPS
+# ---------------------------------------------------------
+# When timestamps are identical (e.g. Excel truncated precision),
+# auto-space points 100ms (100000 usec) apart so the visualization
+# replays at a realistic pace.
+
+CYCLE_USEC = 100_000  # 100ms = radar cycle time
+
+raw_ts = df['TimestampUsec'].values.copy().astype(np.float64)
+synth_ts = np.empty_like(raw_ts)
+synth_ts[0] = raw_ts[0]
+
+for i in range(1, len(raw_ts)):
+    delta = raw_ts[i] - raw_ts[i - 1]
+    if delta < CYCLE_USEC:
+        # Timestamps are too close or identical — insert 100ms gap
+        synth_ts[i] = synth_ts[i - 1] + CYCLE_USEC
+    else:
+        # Real gap preserved
+        synth_ts[i] = synth_ts[i - 1] + delta
+
+df['SynthTimestamp'] = synth_ts
+
+t0 = synth_ts[0]
+t_end = synth_ts[-1]
+
+PADDING_USEC = 2_000_000  # 2 seconds padding in microseconds
+POINT_LIFETIME_USEC = 200_000  # 0.2 seconds point lifetime
+
+timeline_start = t0 - PADDING_USEC
+timeline_end = t_end + PADDING_USEC
+timeline_duration_sec = (timeline_end - timeline_start) / 1_000_000.0
+
+# Slider resolution: 10ms steps for smooth scrubbing
+SLIDER_STEP_USEC = 10_000  # 10ms
+n_steps = int((timeline_end - timeline_start) / SLIDER_STEP_USEC)
+if n_steps < 1:
+    n_steps = 1
+
+n_points = len(df)
+print(f"Successfully read {n_points} points.")
+print(f"Synthetic timeline: {timeline_duration_sec:.2f}s "
+      f"(including 2s padding at start & end)")
+print(f"Point lifetime: 0.2s | Slider steps: {n_steps}")
+
+# ---------------------------------------------------------
+# 3. COMPUTE 72-SECTOR (identical to SendDataToFcThread in C++)
 # ---------------------------------------------------------
 def compute_72_sectors(frame_df):
-    """
-    Mô phỏng chính xác thuật toán trong SendDataToFcThread:
-    1. Khởi tạo mảng 72 phần tử = 65535 (UINT16_MAX = không có vật cản)
-    2. Với mỗi obstacle: range*100 -> cm, angle radian -> degree -> normalize [0,360)
-    3. Tính sector index = round(angle_deg / 5) % 72
-    4. Giữ khoảng cách nhỏ nhất trong mỗi sector
-    """
     distances = np.full(72, 65535, dtype=np.uint16)
 
     for _, obs in frame_df.iterrows():
         dist_cm = obs['Range'] * 100.0
-
-        # Đổi radian sang degree
         angle_deg = obs['Angle'] * (180.0 / np.pi)
 
-        # Chuẩn hoá [0, 360)
         while angle_deg < 0:
             angle_deg += 360.0
         while angle_deg >= 360.0:
             angle_deg -= 360.0
 
-        # Index sector (round to nearest, y hệt code C++)
         idx = int(angle_deg / 5.0 + 0.5) % 72
 
-        # Giữ min distance
         if distances[idx] == 65535 or dist_cm < distances[idx]:
             distances[idx] = int(dist_cm)
 
     return distances
 
 # ---------------------------------------------------------
-# 3. THIẾT LẬP ĐỒ THỊ
+# 4. SETUP FIGURE
 # ---------------------------------------------------------
 fig = plt.figure(figsize=(16, 8))
 fig.patch.set_facecolor('#1a1a2e')
 fig.suptitle('Radar Point Cloud Visualizer', color='white',
              fontsize=14, fontweight='bold')
 
-# Subplot trái: Cartesian 3D (X, Y, DroneAlt)
 ax1 = fig.add_subplot(121, projection='3d', facecolor='#16213e')
-# Subplot phải: 72-Sector Polar (mô phỏng OBSTACLE_DISTANCE)
 ax2 = fig.add_subplot(122, projection='polar', facecolor='#16213e')
 
 plt.subplots_adjust(bottom=0.18, left=0.05, right=0.95, top=0.90, wspace=0.25)
 
-# Thanh slider
+# Slider (time-based)
 ax_slider = plt.axes([0.15, 0.04, 0.7, 0.03], facecolor='#0f3460')
-slider = Slider(ax_slider, 'Point', 0, n_points - 1,
+slider = Slider(ax_slider, 'Time', 0, n_steps,
                 valinit=0, valstep=1, color='#e94560')
 
 time_text = fig.text(0.5, 0.09, '', ha='center', va='center',
                      color='#e94560', fontsize=11, fontweight='bold')
 
 # ---------------------------------------------------------
-# 4. STYLE
+# 5. STYLE
 # ---------------------------------------------------------
 def style_3d_axis(ax, title, xlabel, ylabel, zlabel):
     ax.set_title(title, color='white', fontsize=11, pad=10)
@@ -157,66 +153,76 @@ style_3d_axis(ax1, 'Cartesian (X, Y, Alt)',
 ax1.view_init(elev=90, azim=-90)
 ax1.invert_zaxis()
 
-# Polar style
 ax2.set_title('FC Obstacle Distance Message',
               color='white', fontsize=10, pad=15)
 ax2.set_facecolor('#16213e')
 ax2.tick_params(colors='#707070', labelsize=7)
-ax2.set_theta_zero_location('N')    # 0° = phía trước (North on plot)
-ax2.set_theta_direction(-1)         # Chiều kim đồng hồ (CW) — chuẩn FRD
+ax2.set_theta_zero_location('N')
+ax2.set_theta_direction(-1)
 ax2.grid(True, alpha=0.15, color='#444444')
-ax2.set_rmax(40)                    # Max range 40m
+ax2.set_rmax(40)
 ax2.set_rlabel_position(45)
 
-# Giới hạn trục cố định cho 3D Cartesian
+# Fixed axis limits
 x_min, x_max = df['X'].min() - 1, df['X'].max() + 1
 y_min, y_max = df['Y'].min() - 1, df['Y'].max() + 1
 alt_min = df['DroneAlt'].min() - 0.5
 alt_max = df['DroneAlt'].max() + 0.5
 
-TRAIL_LENGTH = 20
-
-# Lưu plot objects
+# Plot objects
 scatter1 = [None]
 drone_marker1 = [None]
 sector_bars = [None]
 point_scatter2 = [None]
 
+# Precompute synthetic timestamps as numpy array for fast filtering
+synth_arr = df['SynthTimestamp'].values
+
 # ---------------------------------------------------------
-# 5. HÀM CẬP NHẬT
+# 6. UPDATE FUNCTION
 # ---------------------------------------------------------
 def update(val):
-    idx = int(slider.val)
+    step = int(slider.val)
+    current_time = timeline_start + step * SLIDER_STEP_USEC
 
-    # Trail frames (sliding window of last 20 points)
-    start_idx = max(0, idx - TRAIL_LENGTH + 1)
-    trail_df = df.iloc[start_idx:idx + 1].copy()
-    current_point = df.iloc[idx]
-    current_ts = current_point['TimestampMs']
+    # Find all points alive at current_time (within 0.2s lifetime window)
+    # A point is visible if: current_time >= point_time AND current_time - point_time < LIFETIME
+    mask = (synth_arr <= current_time) & (synth_arr > current_time - POINT_LIFETIME_USEC)
+    visible_df = df[mask].copy()
 
-    # Alpha theo tuổi
-    trail_size = len(trail_df)
-    if trail_size > 1:
-        trail_df['alpha'] = 0.15 + 0.85 * (np.arange(trail_size) / (trail_size - 1))
+    # Compute alpha based on age (newer = brighter)
+    if not visible_df.empty:
+        ages = current_time - visible_df['SynthTimestamp'].values
+        # age=0 -> alpha=1.0 (newest), age=LIFETIME -> alpha=0.15 (oldest)
+        visible_df['alpha'] = 1.0 - 0.85 * (ages / POINT_LIFETIME_USEC)
+        visible_df['alpha'] = visible_df['alpha'].clip(0.15, 1.0)
+
+    # Get latest known DroneAlt for drone marker
+    past_mask = synth_arr <= current_time
+    if past_mask.any():
+        last_idx = np.where(past_mask)[0][-1]
+        current_alt = df.iloc[last_idx]['DroneAlt']
     else:
-        trail_df['alpha'] = 1.0
+        current_alt = df.iloc[0]['DroneAlt']
 
     # =============================================
-    # PLOT 1: Cartesian 3D (X, Y, DroneAlt)
+    # PLOT 1: Cartesian 3D
     # =============================================
     if scatter1[0] is not None:
         scatter1[0].remove()
     if drone_marker1[0] is not None:
         drone_marker1[0].remove()
 
-    current_alt = current_point['DroneAlt']
+    if not visible_df.empty:
+        scatter1[0] = ax1.scatter(
+            visible_df['X'], visible_df['Y'], visible_df['DroneAlt'],
+            c=visible_df['alpha'], cmap='plasma',
+            marker='o', s=25, alpha=0.8, edgecolors='none',
+            vmin=0, vmax=1
+        )
+    else:
+        scatter1[0] = None
 
-    scatter1[0] = ax1.scatter(
-        trail_df['X'], trail_df['Y'], trail_df['DroneAlt'],
-        c=trail_df['alpha'], cmap='plasma',
-        marker='o', s=25, alpha=0.8, edgecolors='none',
-        vmin=0, vmax=1
-    )
     drone_marker1[0] = ax1.scatter(
         [0], [0], [current_alt],
         c='#00ff88', marker='^', s=150,
@@ -227,18 +233,15 @@ def update(val):
     ax1.set_zlim(alt_min, alt_max)
 
     # =============================================
-    # PLOT 2: 72-Sector (y hệt FC)
+    # PLOT 2: 72-Sector Polar
     # =============================================
-    # Xóa các bar cũ
     if sector_bars[0] is not None:
         sector_bars[0].remove()
     if point_scatter2[0] is not None:
         point_scatter2[0].remove()
 
-    # Tính 72 sectors từ các điểm trong sliding window (trail_df)
-    sectors = compute_72_sectors(trail_df)
+    sectors = compute_72_sectors(visible_df) if not visible_df.empty else np.full(72, 65535, dtype=np.uint16)
 
-    # Vẽ các sector có vật cản dưới dạng bar trên polar plot
     theta_centers = []
     radii = []
     colors = []
@@ -249,12 +252,10 @@ def update(val):
             dist_m = sectors[i] / 100.0
             theta_centers.append(angle_rad)
             radii.append(dist_m)
-
-            # Màu theo khoảng cách: gần = đỏ (nguy hiểm), xa = xanh (an toàn)
             normalized = min(dist_m / 40.0, 1.0)
-            colors.append(plt.cm.RdYlGn(normalized))  # Red -> Yellow -> Green
+            colors.append(plt.cm.RdYlGn(normalized))
 
-    width = np.deg2rad(5.0)  # Mỗi sector rộng 5°
+    width = np.deg2rad(5.0)
 
     if theta_centers:
         sector_bars[0] = ax2.bar(
@@ -265,13 +266,11 @@ def update(val):
     else:
         sector_bars[0] = None
 
-    # Vẽ các điểm raw của trail lên polar (để so sánh)
-    if not trail_df.empty:
-        raw_angles = trail_df['Angle'].values
-        # Chuẩn hoá angle sang [0, 2π) giống code C++
+    if not visible_df.empty:
+        raw_angles = visible_df['Angle'].values
         raw_angles_norm = raw_angles.copy()
         raw_angles_norm = np.where(raw_angles_norm < 0, raw_angles_norm + 2*np.pi, raw_angles_norm)
-        raw_ranges = trail_df['Range'].values
+        raw_ranges = visible_df['Range'].values
 
         point_scatter2[0] = ax2.scatter(
             raw_angles_norm, raw_ranges,
@@ -282,39 +281,40 @@ def update(val):
 
     ax2.set_rmax(40)
 
-    # Cập nhật text
-    elapsed = (current_ts - t0) / 1000.0
+    # Status text
+    elapsed = (current_time - timeline_start) / 1_000_000.0
+    n_visible = len(visible_df)
     n_active_sectors = sum(1 for s in sectors if s < 65535)
     time_text.set_text(
-        f't = {elapsed:.2f}s  |  Point {idx + 1}/{n_points}  |  '
+        f't = {elapsed:.2f}s  |  {n_visible} visible point(s)  |  '
         f'{n_active_sectors}/72 sectors active'
     )
 
     fig.canvas.draw_idle()
 
 # ---------------------------------------------------------
-# 6. PHÍM TẮT
+# 7. KEYBOARD SHORTCUTS
 # ---------------------------------------------------------
 def on_key(event):
-    idx = int(slider.val)
-    if event.key == 'right' and idx < n_points - 1:
-        slider.set_val(idx + 1)
-    elif event.key == 'left' and idx > 0:
-        slider.set_val(idx - 1)
+    step = int(slider.val)
+    if event.key == 'right' and step < n_steps:
+        slider.set_val(step + 1)
+    elif event.key == 'left' and step > 0:
+        slider.set_val(step - 1)
     elif event.key == 'home':
         slider.set_val(0)
     elif event.key == 'end':
-        slider.set_val(n_frames - 1)
+        slider.set_val(n_steps)
 
 fig.canvas.mpl_connect('key_press_event', on_key)
 slider.on_changed(update)
 
-# Vẽ frame đầu tiên
+# Draw first frame
 update(0)
 
 fig.text(0.5, 0.005,
-         '← → : Prev/Next frame  |  Home/End : First/Last  |  Drag slider to scrub  |'
-         '  × = Raw point  |  Bar = Sector sent to FC',
+         '← → : Prev/Next step  |  Home/End : First/Last  |  Drag slider to scrub  |'
+         '  × = Raw point  |  Bar = Sector sent to FC  |  Point lifetime: 0.2s',
          ha='center', color='#555555', fontsize=8)
 
 plt.show()

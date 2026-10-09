@@ -44,11 +44,11 @@ bool CsvLogger::Open()
     // Ghi Header của file CSV dựa trên loại logger
     if (m_type == LoggerType::RADAR)
     {
-        m_fileStream << "TimestampUsec,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
+        m_fileStream << "TimestampUsec,RadarID,X,Y,Z,Range,Angle,Vx,Vy,Vz,DroneAlt\n";
     }
     else
     {
-        m_fileStream << "TimestampUsec,SectorIdx,DistanceCm\n";
+        m_fileStream << "TimestampUsec,SectorIdx,DistanceCm,DroneAlt\n";
     }
     m_fileStream.flush(); // Đẩy ngay xuống đĩa cứng
 
@@ -77,8 +77,9 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
         // if (obs.range < 2.0f || obs.range > 40.0f) continue;
 
         // Ghi các thuộc tính của vật thể ra dạng phân cách bằng dấu phẩy
-        m_fileStream << std::fixed << std::setprecision(3)
+        m_fileStream << std::fixed << std::setprecision(5)
                      << timestampUsec << ","
+                     << obs.radar_id << ","
                      << obs.x << ","
                      << obs.y << ","
                      << obs.z << ","
@@ -94,7 +95,7 @@ void CsvLogger::LogObstacles(long long timestampUsec, const std::vector<obstacle
 }
 
 // Ghi thông tin các cung gửi sang FC (được đồng bộ)
-void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances[72])
+void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances[72], float droneAlt)
 {
     if (!m_fileStream.is_open())
         return;
@@ -105,7 +106,8 @@ void CsvLogger::LogFcDistances(long long timestampUsec, const uint16_t distances
         {
             m_fileStream << timestampUsec << ","
                          << (int)i << ","
-                         << distances[i] << "\n";
+                         << distances[i] << ","
+                         << std::fixed << std::setprecision(5) << droneAlt << "\n";
         }
     }
     m_fileStream.flush();

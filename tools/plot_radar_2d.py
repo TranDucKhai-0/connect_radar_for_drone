@@ -14,13 +14,13 @@ def main():
     try:
         df = pd.read_csv(file_path)
     except FileNotFoundError:
-        print(f"Không tìm thấy file '{file_path}'.")
-        print("Cách dùng: python3 plot_radar_2d.py <đường_dẫn_file.csv>")
+        print(f"Error: File not found: '{file_path}'.")
+        print("Usage: python3 plot_radar_2d.py <csv_file_path>")
         sys.exit(1)
     
-    # Kiểm tra sự tồn tại của cột X và Y
+    # Check if X and Y columns exist
     if 'X' not in df.columns or 'Y' not in df.columns:
-        print(f"Thiếu cột 'X' hoặc 'Y' trong file CSV. Các cột hiện có: {list(df.columns)}")
+        print(f"Error: Missing column 'X' or 'Y' in CSV file. Existing columns: {list(df.columns)}")
         sys.exit(1)
         
     # Loại bỏ các hàng bị NaN ở cột X hoặc Y
@@ -55,14 +55,14 @@ def main():
         is_left_right = ((df['Angle'] >= 1.178) & (df['Angle'] <= 1.963)) | \
                         ((df['Angle'] >= -1.963) & (df['Angle'] <= -1.178))
         # Loại bỏ các điểm thuộc radar Trái/Phải có Range >= 20m
-        df = df[~(is_left_right & (df['Range'] >= 20.0))]
+        # df = df[~(is_left_right & (df['Range'] >= 20.0))]
     # =========================================================
     
     if len(df) == 0:
-        print("File CSV không có dữ liệu hợp lệ (sau khi loại bỏ giá trị trống, lọc góc và lọc khoảng cách).")
+        print("Error: CSV file has no valid data (after removing NaNs, angle filtering, and range filtering).")
         sys.exit(1)
         
-    print(f"Đọc thành công {len(df)} điểm dữ liệu.")
+    print(f"Successfully read {len(df)} data points.")
     
     # Thiết lập đồ thị
     plt.figure(figsize=(10, 10))
@@ -78,10 +78,10 @@ def main():
     # Đánh dấu vị trí drone tại góc toạ độ (0, 0)
     plt.scatter([0], [0], color='red', marker='^', s=100, label='Drone Origin (0,0)')
     
-    # Thêm tiêu đề và nhãn
-    plt.title('Đồ thị Radar 2D - Hệ trục FRD (X: Tiến, Y: Sang phải)', fontsize=14, fontweight='bold')
-    plt.xlabel('Trục Y (Sang phải) [m]', fontsize=12)
-    plt.ylabel('Trục X (Tiến tới) [m]', fontsize=12)
+    # Add title and labels
+    plt.title('2D Radar Plot - FRD Frame (X: Forward, Y: Right)', fontsize=14, fontweight='bold')
+    plt.xlabel('Y Axis (Right) [m]', fontsize=12)
+    plt.ylabel('X Axis (Forward) [m]', fontsize=12)
     
     # Tuỳ chỉnh lưới và trục
     plt.grid(True, linestyle='--', alpha=0.7)

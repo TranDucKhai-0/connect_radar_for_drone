@@ -11,6 +11,7 @@ class DroneState {
 private:
     float velocity_x_ = 0.0f; // Vận tốc trục North hoặc Front tuỳ bản tin FC (m/s)
     float velocity_y_ = 0.0f; // Vận tốc trục East hoặc Right (m/s)
+    float velocity_z_ = 0.0f; // Vận tốc trục Down (m/s)
     float altitude_m_ = 0.0f; // Độ cao so với mặt đất (m)
     mutable std::mutex mutex_; // Mutex đảm bảo an toàn khi đọc/ghi đa luồng
 
@@ -18,18 +19,20 @@ public:
     DroneState() = default;
 
     // Cập nhật trạng thái mới nhất từ FC
-    void Update(float vx, float vy, float alt) {
+    void Update(float vx, float vy, float vz, float alt) {
         std::lock_guard<std::mutex> lock(mutex_);
         velocity_x_ = vx;
         velocity_y_ = vy;
+        velocity_z_ = vz;
         altitude_m_ = alt;
     }
 
     // Lấy trạng thái hiện tại (Copy an toàn qua tham chiếu)
-    void GetState(float& vx, float& vy, float& alt) const {
+    void GetState(float& vx, float& vy, float& vz, float& alt) const {
         std::lock_guard<std::mutex> lock(mutex_);
         vx = velocity_x_;
         vy = velocity_y_;
+        vz = velocity_z_;
         alt = altitude_m_;
     }
     

@@ -25,8 +25,8 @@ public:
     // Hàm thực hiện ghi thông tin từng vật cản cùng timestamp và độ cao drone ra file
     void LogObstacles(long long timestampUsec, const std::vector<obstacleAbsolute_t>& obstacles, float droneAlt);
 
-    // Hàm thực hiện ghi thông tin các cung gửi sang FC (được đồng bộ)
-    void LogFcDistances(long long timestampUsec, const uint16_t distances[72]);
+    // Hàm thực hiện ghi thông tin các cung gửi sang FC (được đồng bộ) cùng độ cao drone
+    void LogFcDistances(long long timestampUsec, const uint16_t distances[72], float droneAlt);
 
 private:
     std::string m_filename; // Đường dẫn và tên file CSV

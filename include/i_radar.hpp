@@ -8,7 +8,7 @@
 // Định nghĩa chung cho một vật cản (áp dụng chung cho mọi Radar)
 typedef struct
 {
-    uint8_t id;            // ID của vật cản (do radar cung cấp, không phải ID riêng của radar)
+    int16_t id;            // ID của vật cản (do radar cung cấp, không phải ID riêng của radar, -1 nếu không có ID)
     float x;           // Vị trí tương đối trục x (Longitudinal distance) (m)
     float y;           // Vị trí tương đối trục y (Lateral distance) (m)
     float z;           // Vị trí tương đối trục z (Vertical distance) (m)
@@ -21,7 +21,8 @@ typedef struct
 
 typedef struct
 {
-    uint8_t id;            // ID của vật cản
+    int16_t id;            // ID của vật cản (do radar cung cấp, -1 nếu không có ID)
+    int16_t radar_id;      // ID của radar phát hiện điểm này (1=Front, 2=Right, 3=Back, 4=Left)
     float x;           // Vị trí tuyệt đối trục x (m)
     float y;           // Vị trí tuyệt đối trục y (m)
     float z;           // Vị trí tuyệt đối trục z (m)
