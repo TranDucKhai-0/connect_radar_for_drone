@@ -120,10 +120,10 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         }
 
         // Lọc theo góc FOV của từng radar (m_id)
-        if(m_id == 1 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
-            isValid = false;
-        else if (m_id == 2 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
-            isValid = false;
+        // if(m_id == 1 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
+        //     isValid = false;
+        // else if (m_id == 2 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
+        //     isValid = false;
 
         if (isValid)
         {
