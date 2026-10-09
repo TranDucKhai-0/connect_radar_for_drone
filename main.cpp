@@ -1092,7 +1092,8 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
         while (g_isAppRunning && g_laser_serial_fd < 0)
         {
             std::cout << "LRF: Scanning for CP2102 USB devices...\n";
-            std::vector<std::string> cp2102_ports = AutoDetectCP2102Ports();
+            // std::vector<std::string> cp2102_ports = AutoDetectCP2102Ports();
+            std::vector<std::string> cp2102_ports = {"/dev/ttyREAR"};
 
             if (cp2102_ports.empty())
             {
