@@ -33,7 +33,7 @@ extern "C" {
 
 #define CYCLE_TIME_MS 100 // Chu kỳ 100ms (10Hz) để gửi tới FC và GCS và ghi log
 
-#define VERSION "2.1.7"
+#define VERSION "2.1.8"
 #define VERSION_TYPE "For Development on Hera2.0"
 #define VERSION_TYPE_FOR_DEVELOPMENT 1
 
@@ -801,26 +801,29 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
     {
         uint32_t now = GetTimeBootMs();
 
-        // Gửi gói tin dummy định kỳ nếu không nhận được dữ liệu (hoặc khi bắt đầu)
-        // Nếu chưa từng nhận gói nào/quá 2 giây mất kết nối, và chưa từng gửi dummy/đã quá 1 giây từ lần gửi dummy trước đó:
+        // Gửi bản tin MAVLink HEARTBEAT định kỳ để đăng ký Client với mavlink-router
+        // Nếu chưa từng nhận gói nào/quá 2 giây mất kết nối, và chưa từng gửi dummy/đã quá 1 giây từ lần gửi trước đó:
         if (lastPacketReceivedMs == 0 || now - lastPacketReceivedMs > 2000)
         {
             if (lastDummySentMs == 0 || now - lastDummySentMs > 1000)
             {
-                char dummy = 'X';
-                sendto(sock, &dummy, 1, 0, (struct sockaddr *)&addr, sizeof(addr));
+                mavlink_message_t hb_msg;
+                uint8_t hb_buf[MAVLINK_MAX_PACKET_LEN];
+
+                // Đóng gói Heartbeat chuẩn MAVLink (Component ID 195 = MAV_COMP_ID_OBSTACLE_AVOIDANCE)
+                mavlink_msg_heartbeat_pack(
+                    1, 195, &hb_msg,
+                    MAV_TYPE_ONBOARD_CONTROLLER,
+                    MAV_AUTOPILOT_INVALID,
+                    MAV_MODE_PREFLIGHT, 0, MAV_STATE_ACTIVE);
+
+                int hb_len = mavlink_msg_to_send_buffer(hb_buf, &hb_msg);
+                sendto(sock, hb_buf, hb_len, 0, (struct sockaddr *)&addr, sizeof(addr));
                 lastDummySentMs = now;
             }
         }
 
         int n = recv(sock, buffer, sizeof(buffer), 0);
-
-        // Kiểm tra có nhận được data từ FC không?
-        // static uint32_t lastCheckMs = 0;
-        // if (now - lastCheckMs > 1000) {
-        //     std::cout << "[DEBUG] FcListener recv n = " << n << std::endl;
-        //     lastCheckMs = now;
-        // }
 
         if (n > 0)
         {
@@ -859,7 +862,13 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
                         // Cập nhật cờ hoạt động hệ thống dựa trên độ cao (hysteresis)
                         float altCm = altM * 100.0f;
 
-                        // std::cout << "Atl hiện tại "<< altCm << " cm \n";
+                        // In log theo dõi độ cao định kỳ 500ms
+                        // static uint32_t lastPrintAltMs = 0;
+                        // if (now - lastPrintAltMs >= 500)
+                        // {
+                        //     std::cout << "Alt (GLOBAL_POSITION_INT): " << altCm << " cm (" << altM << " m)" << std::endl;
+                        //     lastPrintAltMs = now;
+                        // }
 
                         if (altCm >= altMin)
                         {
@@ -1371,7 +1380,7 @@ int main(int argc, char **argv)
     int gcsPort = 14550;
     std::string fcIp = "127.0.0.1";
     int fcPort = 14550;
-    int localFcListenPort = 14551; // Port nghe telemetry từ FC
+    int localFcListenPort = 14550; // Port nghe telemetry từ FC (dùng chung 14550 với FC Port)
     std::string canInterface = "can0";
     std::string logDir = "/usr/local/etc/connect_radar_for_drone/blackbox"; // Thư mục lưu log mặc định
     int altMin = 1001; // cm
