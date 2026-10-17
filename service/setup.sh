@@ -15,7 +15,7 @@ if command -v cmake &> /dev/null; then
     [ -f connect_radar_for_drone ] && mv connect_radar_for_drone radar_app || true
 else
     # Compile thẳng ra build/radar_app
-    g++ -std=c++17 -I../include ../src/*.cpp ../main.cpp -o radar_app -lpthread >> build.log || true
+    g++ -std=c++17 -I../include ../src/*.cpp ../src/*.c ../main.cpp -o radar_app -lpthread >> build.log || true
 fi
 cd ..
 

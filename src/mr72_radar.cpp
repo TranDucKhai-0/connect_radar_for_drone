@@ -88,12 +88,23 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         // Theo tài liệu kỹ thuật của MR72, Sector 2 là khu vực chính giữa (Sector 1 bên trái, Sector 3 bên phải).
         // Chỉ lấy vật thể ở Sector 2 (chính giữa) để giảm nhiễu từ hai bên sườn.
         bool isValid = true;
-        if (sectorNumber != 0x02)
-        {
-            isValid = false;
-        }
-        else
-        {
+
+
+        // logic lọc sector cho radar còn ở chế độ defaut nếu muốn
+        // if ((m_id == 2 || m_id == 4) && sectorNumber != 0x02)
+        // {
+        //     isValid = false;
+        // }
+        
+
+        // Nếu dùng định dạng area thì comment từ đây
+        // if (sectorNumber != 0x02)
+        // {
+        //     isValid = false;
+        // }
+        // else
+        // {
+        // Tới đây
             // Lọc khoảng cách tùy thuộc vào vị trí lắp đặt của radar (m_id)
             if (m_id == 1 || m_id == 3) // Front, Back (2m - 40m)
             {
@@ -108,6 +119,13 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
                 {
                     isValid = false;
                 }
+
+                // logic lọc sector cho radar còn ở chế độ defaut nếu muốn
+                if (sectorNumber != 0x02)
+                {
+                    isValid = false;
+                }
+                
             }
             else
             {
@@ -117,8 +135,11 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
                     isValid = false;
                 }
             }
-        }
 
+        // Nếu dùng định dạng area thì comment từ đây
+        // }
+        // Tới đây
+        
         // Lọc theo góc FOV của từng radar (m_id)
         // if(m_id == 1 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
         //     isValid = false;

@@ -33,6 +33,10 @@ extern "C" {
 
 #define CYCLE_TIME_MS 100 // Chu kỳ 100ms (10Hz) để gửi tới FC và GCS và ghi log
 
+#define VERSION "2.1.7"
+#define VERSION_TYPE "For Development on Hera2.0"
+#define VERSION_TYPE_FOR_DEVELOPMENT 1
+
 // Tích hợp thư viện MAVLink C
 #include "../library/c_library_v2/ardupilotmega/mavlink.h"
 
@@ -435,7 +439,9 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
             }
 
             g_queueLog.Push(pAbsFrame);
+#if VERSION_TYPE_FOR_DEVELOPMENT
             g_queueGcs.Push(pAbsFrame);
+#endif
             g_queueFc.Push(pAbsFrame);
 
             lastPushTimeMs = now;
@@ -535,6 +541,7 @@ void WriteLogThread(const std::string &logDir, bool forceLog)
     std::cout << "WriteLogThread Exited.\n";
 }
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
 // ---------------------------------------------------------
 // THREAD 4: Gửi GCS (OBSTACLE_DISTANCE_3D)
 // ---------------------------------------------------------
@@ -595,6 +602,7 @@ void SendDataToGcsThread(const std::string &ip, int port)
     close(sock);
     std::cout << "SendDataToGcsThread Exited.\n";
 }
+#endif
 
 // ---------------------------------------------------------
 // THREAD 5: Gửi FC (OBSTACLE_DISTANCE)
@@ -806,6 +814,14 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
         }
 
         int n = recv(sock, buffer, sizeof(buffer), 0);
+
+        // Kiểm tra có nhận được data từ FC không?
+        // static uint32_t lastCheckMs = 0;
+        // if (now - lastCheckMs > 1000) {
+        //     std::cout << "[DEBUG] FcListener recv n = " << n << std::endl;
+        //     lastCheckMs = now;
+        // }
+
         if (n > 0)
         {
             lastPacketReceivedMs = now;
@@ -842,6 +858,9 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
 
                         // Cập nhật cờ hoạt động hệ thống dựa trên độ cao (hysteresis)
                         float altCm = altM * 100.0f;
+
+                        // std::cout << "Atl hiện tại "<< altCm << " cm \n";
+
                         if (altCm >= altMin)
                         {
                             if (!g_isSystemActive)
@@ -1091,25 +1110,25 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 
         while (g_isAppRunning && g_laser_serial_fd < 0)
         {
-            std::cout << "LRF: Scanning for CP2102 USB devices...\n";
+            // std::cout << "LRF: Scanning for CP2102 USB devices...\n";
             // std::vector<std::string> cp2102_ports = AutoDetectCP2102Ports();
             std::vector<std::string> cp2102_ports = {"/dev/ttyREAR"};
 
             if (cp2102_ports.empty())
             {
-                std::cerr << "LRF: No CP2102 found. Retrying in 2s...\n";
+                // std::cerr << "LRF: No CP2102 found. Retrying in 2s...\n";
                 std::this_thread::sleep_for(std::chrono::seconds(2));
                 continue;
             }
 
-            std::cout << "LRF: Found " << cp2102_ports.size() << " CP2102 port(s). Validating...\n";
+            // std::cout << "LRF: Found " << cp2102_ports.size() << " CP2102 port(s). Validating...\n";
 
             // Thử từng cổng CP2102: mở → cấu hình SF20 → chờ parse thành công
             for (const auto& port : cp2102_ports)
             {
                 if (!g_isAppRunning) break;
 
-                std::cout << "LRF: Trying " << port << "...\n";
+                // std::cout << "LRF: Trying " << port << "...\n";
                 int fd = OpenSerialPort(port);
                 if (fd < 0) continue;
 
@@ -1161,14 +1180,14 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 if (validated)
                 {
                     connected_port = port;
-                    std::cout << "LRF: ✓ Laser SF20 confirmed on " << port
-                              << " (distance: " << laser_data.distance_cm << " cm)\n";
+                    // std::cout << "LRF: ✓ Laser SF20 confirmed on " << port
+                    //           << " (distance: " << laser_data.distance_cm << " cm)\n";
                     break;  // Thoát vòng for — đã tìm đúng cổng
                 }
                 else
                 {
                     // Cổng này không phải Laser → đóng và thử cổng tiếp theo
-                    std::cout << "LRF: ✗ " << port << " is not Laser SF20.\n";
+                    // std::cout << "LRF: ✗ " << port << " is not Laser SF20.\n";
                     close(fd);
                     g_laser_serial_fd = -1;
                 }
@@ -1177,7 +1196,7 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
             // Nếu không cổng nào validate thành công → chờ rồi quét lại
             if (g_laser_serial_fd < 0)
             {
-                std::cerr << "LRF: No valid Laser found on any CP2102 port. Retrying in 2s...\n";
+                // std::cerr << "LRF: No valid Laser found on any CP2102 port. Retrying in 2s...\n";
                 std::this_thread::sleep_for(std::chrono::seconds(2));
             }
         }
@@ -1237,7 +1256,7 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                             static auto last_log_time = std::chrono::steady_clock::now();
                             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 50)
                             {
-                                std::cout << "LRF: Distance = " << distance_cm << " cm, Quality = " << (int)signal_quality << "%\n";
+                                // std::cout << "LRF: Distance = " << distance_cm << " cm, Quality = " << (int)signal_quality << "%\n";
                                 last_log_time = now;
                             }
 
@@ -1451,6 +1470,7 @@ int main(int argc, char **argv)
     std::signal(SIGINT, SignalHandler);
 
     std::cout << "Starting Radar App Pipeline...\n"
+              << "Version Firmware: " << VERSION << " - " << VERSION_TYPE << "\n"
               << "GCS: " << gcsIp << ":" << gcsPort << "\n"
               << "FC Dest: " << fcIp << ":" << fcPort << "\n"
               << "FC Listen Port: " << localFcListenPort << "\n"
@@ -1461,7 +1481,9 @@ int main(int argc, char **argv)
     std::thread t1(ReadDataFromRadarThread, canInterface);
     std::thread t2(DataProcessingThread, logDir, forceLog);
     std::thread t3(WriteLogThread, logDir, forceLog);
+#if VERSION_TYPE_FOR_DEVELOPMENT
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
+#endif
     std::thread t5(SendDataToFcThread, fcIp, fcPort, logDir, forceLog);
     std::thread t6(FcListenerThread, localFcListenPort, altMin, altDis);
     std::thread t7(LaserRangeFinderThread, fcIp, fcPort);
@@ -1473,8 +1495,10 @@ int main(int argc, char **argv)
         t2.join();
     if (t3.joinable())
         t3.join();
+#if VERSION_TYPE_FOR_DEVELOPMENT
     if (t4.joinable())
         t4.join();
+#endif
     if (t5.joinable())
         t5.join();
     if (t6.joinable())
