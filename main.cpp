@@ -31,11 +31,16 @@ extern "C" {
 
 #define NUMBER_FRAME_OUT 3 // số khung hình liên tiếp điểm ma xuất hiện 
 
-#define CYCLE_TIME_MS 100 // Chu kỳ 100ms (10Hz) để gửi tới FC và GCS và ghi log
+#define CYCLE_TIME_MS 50 // Chu kỳ 100ms (10Hz) để gửi tới FC và GCS và ghi log
 
-#define VERSION "2.1.8"
+#define VERSION "2.1.10"
+#define VERSION_TYPE_FOR_DEVELOPMENT 0 // 1: Development/Debug mode, 0: User/Production release
+
+#if VERSION_TYPE_FOR_DEVELOPMENT
 #define VERSION_TYPE "For Development on Hera2.0"
-#define VERSION_TYPE_FOR_DEVELOPMENT 1
+#else
+#define VERSION_TYPE "User Release on Hera2.0"
+#endif
 
 // Tích hợp thư viện MAVLink C
 #include "../library/c_library_v2/ardupilotmega/mavlink.h"
@@ -181,7 +186,9 @@ void ReadDataFromRadarThread(const std::string &canIface)
         }
     }
     canBus.Disconnect();
+#if VERSION_TYPE_FOR_DEVELOPMENT
     std::cout << "ReadDataFromRadarThread Exited.\n";
+#endif
 }
 
 struct trackedObject_t
@@ -202,6 +209,7 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
     constexpr float timeDelayThreadSleepSeconds = CYCLE_TIME_MS / 1000.0f; // Bù trừ trễ thời gian thread ngủ để tăng độ chính xác khi tính toán bù trừ (s)
     uint32_t lastPushTimeMs = GetTimeBootMs();
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
     // Logger cho dữ liệu thô nhận được từ các radar
     CsvLogger rawRadarLogger(logDir + "/raw_radar_log.csv");
     bool isLogging = false;
@@ -215,6 +223,7 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
             std::cout << "Force Log mode enabled. Started Raw Radar recording immediately.\n";
         }
     }
+#endif
 
     while (g_isAppRunning)
     {
@@ -229,6 +238,7 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
             lastWatchdogPingMs = now;
         }
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
         // Quản lý trạng thái log tự động dựa trên độ cao nếu không ở chế độ forceLog
         if (!forceLog)
         {
@@ -253,6 +263,7 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
                 }
             }
         }
+#endif
 
         // Rút sạch tất cả dữ liệu hiện có trong queue g_queueRelative
         while (g_queueRelative.TryPop(framePair))
@@ -359,12 +370,14 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
                 newAbsPoints.push_back(absObs);
             }
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
             // Ghi log dữ liệu thô (sau khi xoay hệ trục về drone)
             if (isLogging)
             {
                 long long timestampUsec = GetCurrentTimestampUsec();
                 rawRadarLogger.LogObstacles(timestampUsec, newAbsPoints, -alt);
             }
+#endif
 
             // Cập nhật tọa độ vật cản vào trackedObjects dựa theo ID duy nhất
             for (auto &new_point : newAbsPoints)
@@ -437,9 +450,8 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
                     pAbsFrame->push_back(track.data);
                 // }
             }
-
-            g_queueLog.Push(pAbsFrame);
 #if VERSION_TYPE_FOR_DEVELOPMENT
+            g_queueLog.Push(pAbsFrame);
             g_queueGcs.Push(pAbsFrame);
 #endif
             g_queueFc.Push(pAbsFrame);
@@ -454,13 +466,16 @@ void DataProcessingThread(const std::string &logDir, bool forceLog)
         }
     }
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
     if (isLogging)
     {
         rawRadarLogger.Close();
     }
     std::cout << "DataProcessingThread Exited.\n";
+#endif
 }
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
 // ---------------------------------------------------------
 // THREAD 3: Ghi Log
 // ---------------------------------------------------------
@@ -541,7 +556,6 @@ void WriteLogThread(const std::string &logDir, bool forceLog)
     std::cout << "WriteLogThread Exited.\n";
 }
 
-#if VERSION_TYPE_FOR_DEVELOPMENT
 // ---------------------------------------------------------
 // THREAD 4: Gửi GCS (OBSTACLE_DISTANCE_3D)
 // ---------------------------------------------------------
@@ -607,20 +621,17 @@ void SendDataToGcsThread(const std::string &ip, int port)
 // ---------------------------------------------------------
 // THREAD 5: Gửi FC (OBSTACLE_DISTANCE)
 // ---------------------------------------------------------
-void SendDataToFcThread(const std::string &ip, int port, const std::string &logDir, bool forceLog)
+void SendDataToFcThread(int sock, const struct sockaddr_in &addr, const std::string &logDir, bool forceLog)
 {
-    struct sockaddr_in addr;
-    int sock = CreateUdpSocket(ip, port, addr);
-    if (sock < 0)
-        return;
-
     sharedFrameAbsolute_t pLatestFrame;
     sharedFrameAbsolute_t pTempFrame;
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
     // Ghi log đồng bộ CubeFC
     std::string logFilePath = logDir + "/cubefc_radar_log.csv";
     CsvLogger csvLogger(logFilePath, LoggerType::FC);
     bool isLogging = false;
+#endif
 
     // Ép cấu hình MAVLink 2 trên kênh COMM_2
     mavlink_status_t *status = mavlink_get_channel_status(MAVLINK_COMM_2);
@@ -701,6 +712,7 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
                 }
             }
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
             // Ghi log đồng bộ CubeFC
             if (forceLog)
             {
@@ -742,6 +754,7 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
                 float droneAlt = g_droneState.GetAltitude();
                 csvLogger.LogFcDistances(GetCurrentTimestampUsec(), distances, droneAlt);
             }
+#endif
 
             // Đóng gói bản tin sử dụng MAVLINK_COMM_2, timestamp bằng 0
             mavlink_msg_obstacle_distance_pack_chan(
@@ -766,66 +779,52 @@ void SendDataToFcThread(const std::string &ip, int port, const std::string &logD
             next_wake_time = current_time;
         std::this_thread::sleep_until(next_wake_time);
     }
+#if VERSION_TYPE_FOR_DEVELOPMENT
     if (isLogging)
         csvLogger.Close();
-    close(sock);
     std::cout << "SendDataToFcThread Exited.\n";
+#endif
 }
 
 // ---------------------------------------------------------
 // THREAD 6: Lắng nghe FC (Cập nhật Drone State)
 // ---------------------------------------------------------
-void FcListenerThread(int listenPort, int altMin, int altDis)
+void FcListenerThread(int sock, const struct sockaddr_in &addr, int altMin, int altDis)
 {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-        return;
-
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(listenPort);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 100000;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
     uint8_t buffer[2048];
     uint32_t lastDummySentMs = 0;
     uint32_t lastPacketReceivedMs = 0;
+    uint32_t lastIntervalRequestMs = 0;
 
     while (g_isAppRunning)
     {
         uint32_t now = GetTimeBootMs();
 
-        // Gửi bản tin MAVLink HEARTBEAT định kỳ để đăng ký Client với mavlink-router
-        // Nếu chưa từng nhận gói nào/quá 2 giây mất kết nối, và chưa từng gửi dummy/đã quá 1 giây từ lần gửi trước đó:
-        if (lastPacketReceivedMs == 0 || now - lastPacketReceivedMs > 2000)
+        // Gửi bản tin MAVLink HEARTBEAT định kỳ 1Hz để duy trì đăng ký Client với mavlink-router và FC
+        if (lastDummySentMs == 0 || (now - lastDummySentMs >= 1000))
         {
-            if (lastDummySentMs == 0 || now - lastDummySentMs > 1000)
-            {
-                mavlink_message_t hb_msg;
-                uint8_t hb_buf[MAVLINK_MAX_PACKET_LEN];
+            mavlink_message_t hb_msg;
+            uint8_t hb_buf[MAVLINK_MAX_PACKET_LEN];
 
-                // Đóng gói Heartbeat chuẩn MAVLink (Component ID 195 = MAV_COMP_ID_OBSTACLE_AVOIDANCE)
-                mavlink_msg_heartbeat_pack(
-                    1, 195, &hb_msg,
-                    MAV_TYPE_ONBOARD_CONTROLLER,
-                    MAV_AUTOPILOT_INVALID,
-                    MAV_MODE_PREFLIGHT, 0, MAV_STATE_ACTIVE);
+            // Đóng gói Heartbeat chuẩn MAVLink (Component ID 195 = MAV_COMP_ID_OBSTACLE_AVOIDANCE)
+            mavlink_msg_heartbeat_pack(
+                1, 195, &hb_msg,
+                MAV_TYPE_ONBOARD_CONTROLLER,
+                MAV_AUTOPILOT_INVALID,
+                MAV_MODE_PREFLIGHT, 0, MAV_STATE_ACTIVE);
 
-                int hb_len = mavlink_msg_to_send_buffer(hb_buf, &hb_msg);
-                sendto(sock, hb_buf, hb_len, 0, (struct sockaddr *)&addr, sizeof(addr));
-                lastDummySentMs = now;
-            }
+            int hb_len = mavlink_msg_to_send_buffer(hb_buf, &hb_msg);
+            sendto(sock, hb_buf, hb_len, 0, (struct sockaddr *)&addr, sizeof(addr));
+            lastDummySentMs = now;
         }
 
+        // Đọc gói tin đầu tiên (chờ tối đa theo SO_RCVTIMEO = 100ms)
         int n = recv(sock, buffer, sizeof(buffer), 0);
 
-        if (n > 0)
+        // Vòng lặp xả cạn hàng đợi: Xử lý gói tin hiện tại và lập tức đọc
+        // tất cả các gói còn tồn đọng trong bộ đệm socket bằng cờ MSG_DONTWAIT (non-blocking)
+        // để luôn cập nhật trạng thái mới nhất, loại bỏ hoàn toàn độ trễ do dồn ứ gói cũ.
+        while (n > 0)
         {
             lastPacketReceivedMs = now;
             mavlink_message_t msg;
@@ -862,9 +861,9 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
                         // Cập nhật cờ hoạt động hệ thống dựa trên độ cao (hysteresis)
                         float altCm = altM * 100.0f;
 
-                        // In log theo dõi độ cao định kỳ 500ms
+                        // In log theo dõi độ cao định kỳ 100ms
                         // static uint32_t lastPrintAltMs = 0;
-                        // if (now - lastPrintAltMs >= 500)
+                        // if (now - lastPrintAltMs >= 100)
                         // {
                         //     std::cout << "Alt (GLOBAL_POSITION_INT): " << altCm << " cm (" << altM << " m)" << std::endl;
                         //     lastPrintAltMs = now;
@@ -875,7 +874,9 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
                             if (!g_isSystemActive)
                             {
                                 g_isSystemActive = true;
+#if VERSION_TYPE_FOR_DEVELOPMENT
                                 std::cout << "System activated (Altitude " << altCm << " cm >= altMin " << altMin << " cm).\n";
+#endif
                             }
                         }
                         else if (altCm < altDis)
@@ -883,16 +884,22 @@ void FcListenerThread(int listenPort, int altMin, int altDis)
                             if (g_isSystemActive)
                             {
                                 g_isSystemActive = false;
+#if VERSION_TYPE_FOR_DEVELOPMENT
                                 std::cout << "System deactivated (Altitude " << altCm << " cm < altDis " << altDis << " cm).\n";
+#endif
                             }
                         }
                     }
                 }
             }
+
+            // Tiếp tục rút các gói tiếp theo đang chờ trong buffer kernel (non-blocking)
+            n = recv(sock, buffer, sizeof(buffer), MSG_DONTWAIT);
         }
     }
-    close(sock);
+#if VERSION_TYPE_FOR_DEVELOPMENT
     std::cout << "FcListenerThread Exited.\n";
+#endif
 }
 
 // ---------------------------------------------------------
@@ -1072,24 +1079,17 @@ static uint8_t ConvertStrengthToQuality(int16_t strength_raw)
 //           Hoạt động hoàn toàn độc lập với pipeline Radar
 //           Giao tiếp qua USB Serial (CP2102) → MAVLink DISTANCE_SENSOR → FC
 // ---------------------------------------------------------
-void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
+void LaserRangeFinderThread(int udp_sock, const struct sockaddr_in &fc_addr)
 {
+#if VERSION_TYPE_FOR_DEVELOPMENT
     std::cout << "LRF: Thread started.\n";
+#endif
 
     // ── Khởi tạo Laser Handle (y hệt F405: laser_task.c dòng 43-45) ──
     Laser_Handle_t laser_handle;
     memset(&laser_handle, 0, sizeof(laser_handle));
     laser_handle.config.transmit_cb = Laser_Linux_TxCallback;
     laser_handle.is_initialized = true;
-
-    // ── Tạo UDP Socket để gửi DISTANCE_SENSOR tới FC (cùng ip:port với Radar) ──
-    struct sockaddr_in fc_addr;
-    int udp_sock = CreateUdpSocket(fcIp, fcPort, fc_addr);
-    if (udp_sock < 0)
-    {
-        std::cerr << "LRF: Failed to create UDP socket.\n";
-        return;
-    }
 
     // ── Ép MAVLink 2 trên kênh COMM_3 (kênh riêng cho LRF) ──
     mavlink_status_t* mav_status = mavlink_get_channel_status(MAVLINK_COMM_3);
@@ -1119,25 +1119,30 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 
         while (g_isAppRunning && g_laser_serial_fd < 0)
         {
-            // std::cout << "LRF: Scanning for CP2102 USB devices...\n";
+#if VERSION_TYPE_FOR_DEVELOPMENT
+            std::cout << "LRF: Scanning for CP2102 USB devices...\n";
+#endif
             // std::vector<std::string> cp2102_ports = AutoDetectCP2102Ports();
             std::vector<std::string> cp2102_ports = {"/dev/ttyREAR"};
 
             if (cp2102_ports.empty())
             {
-                // std::cerr << "LRF: No CP2102 found. Retrying in 2s...\n";
+#if VERSION_TYPE_FOR_DEVELOPMENT
+                std::cerr << "LRF: No CP2102 found. Retrying in 2s...\n";
+#endif
                 std::this_thread::sleep_for(std::chrono::seconds(2));
                 continue;
             }
-
-            // std::cout << "LRF: Found " << cp2102_ports.size() << " CP2102 port(s). Validating...\n";
-
+#if VERSION_TYPE_FOR_DEVELOPMENT
+            std::cout << "LRF: Found " << cp2102_ports.size() << " CP2102 port(s). Validating...\n";
+#endif
             // Thử từng cổng CP2102: mở → cấu hình SF20 → chờ parse thành công
             for (const auto& port : cp2102_ports)
             {
                 if (!g_isAppRunning) break;
-
-                // std::cout << "LRF: Trying " << port << "...\n";
+#if VERSION_TYPE_FOR_DEVELOPMENT
+                std::cout << "LRF: Trying " << port << "...\n";
+#endif
                 int fd = OpenSerialPort(port);
                 if (fd < 0) continue;
 
@@ -1189,14 +1194,18 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 if (validated)
                 {
                     connected_port = port;
-                    // std::cout << "LRF: ✓ Laser SF20 confirmed on " << port
-                    //           << " (distance: " << laser_data.distance_cm << " cm)\n";
+#if VERSION_TYPE_FOR_DEVELOPMENT
+                    std::cout << "LRF: ✓ Laser SF20 confirmed on " << port
+                              << " (distance: " << laser_data.distance_cm << " cm)\n";
+#endif
                     break;  // Thoát vòng for — đã tìm đúng cổng
                 }
                 else
                 {
+#if VERSION_TYPE_FOR_DEVELOPMENT
                     // Cổng này không phải Laser → đóng và thử cổng tiếp theo
-                    // std::cout << "LRF: ✗ " << port << " is not Laser SF20.\n";
+                    std::cout << "LRF: ✗ " << port << " is not Laser SF20.\n";
+#endif
                     close(fd);
                     g_laser_serial_fd = -1;
                 }
@@ -1205,7 +1214,9 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
             // Nếu không cổng nào validate thành công → chờ rồi quét lại
             if (g_laser_serial_fd < 0)
             {
-                // std::cerr << "LRF: No valid Laser found on any CP2102 port. Retrying in 2s...\n";
+#if VERSION_TYPE_FOR_DEVELOPMENT
+                std::cerr << "LRF: No valid Laser found on any CP2102 port. Retrying in 2s...\n";
+#endif                
                 std::this_thread::sleep_for(std::chrono::seconds(2));
             }
         }
@@ -1219,7 +1230,9 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
         memset(circular_buf, 0, sizeof(circular_buf));
         circular_head = 0;
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
         std::cout << "LRF: Entering main read loop on " << connected_port << "\n";
+#endif
 
         while (g_isAppRunning)
         {
@@ -1261,13 +1274,17 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                             uint16_t distance_cm = (uint16_t)laser_data.distance_cm;
                             uint8_t signal_quality = ConvertStrengthToQuality(laser_data.signal_strength_raw);
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
                             // In log khoảng cách mỗi 500ms (2Hz) ra terminal để tiện theo dõi
                             static auto last_log_time = std::chrono::steady_clock::now();
-                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 50)
+                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_log_time).count() >= 500)
                             {
-                                // std::cout << "LRF: Distance = " << distance_cm << " cm, Quality = " << (int)signal_quality << "%\n";
+
+                                std::cout << "LRF: Distance = " << distance_cm << " cm, Quality = " << (int)signal_quality << "%\n";
+
                                 last_log_time = now;
                             }
+#endif
 
                             // Đóng gói MAVLink DISTANCE_SENSOR (Message ID #132)
                             // Cấu hình theo khuyến cáo ArduPilot cho downward rangefinder
@@ -1307,7 +1324,9 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 // Nếu CP2102 bị reset đột ngột hoặc rút ra, node /dev/ttyUSBx sẽ bị mất
                 if (access(connected_port.c_str(), F_OK) != 0)
                 {
+#if VERSION_TYPE_FOR_DEVELOPMENT
                     std::cerr << "LRF: CP2102 disconnected (" << connected_port << " missing). Reconnecting...\n";
+#endif
                     close(g_laser_serial_fd);
                     g_laser_serial_fd = -1;
                     break;
@@ -1318,8 +1337,10 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
                 // Lỗi read() → có thể USB bị rút / disconnect
                 if (errno == EINTR) continue;  // Signal interrupt → thử lại
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
                 std::cerr << "LRF: Serial read error on " << connected_port
                           << ": " << strerror(errno) << ". Reconnecting...\n";
+#endif
                 close(g_laser_serial_fd);
                 g_laser_serial_fd = -1;
                 break;  // Thoát vòng while trong → quay lại PHASE 1 auto-detect
@@ -1333,7 +1354,9 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
 
             if (silent_ms > 1000)
             {
+#if VERSION_TYPE_FOR_DEVELOPMENT
                 std::cout << "LRF: No valid data for " << silent_ms << "ms. Reconfiguring SF20...\n";
+#endif
                 SetupLaserSF20(&laser_handle);
                 last_valid_parse_time = std::chrono::steady_clock::now();
                 
@@ -1350,8 +1373,9 @@ void LaserRangeFinderThread(const std::string& fcIp, int fcPort)
         close(g_laser_serial_fd);
         g_laser_serial_fd = -1;
     }
-    close(udp_sock);
+#if VERSION_TYPE_FOR_DEVELOPMENT
     std::cout << "LaserRangeFinderThread Exited.\n";
+#endif
 }
 
 void PrintUsage()
@@ -1477,43 +1501,69 @@ int main(int argc, char **argv)
     }
 
     std::signal(SIGINT, SignalHandler);
+    std::signal(SIGTERM, SignalHandler);
 
+#if VERSION_TYPE_FOR_DEVELOPMENT
     std::cout << "Starting Radar App Pipeline...\n"
               << "Version Firmware: " << VERSION << " - " << VERSION_TYPE << "\n"
               << "GCS: " << gcsIp << ":" << gcsPort << "\n"
-              << "FC Dest: " << fcIp << ":" << fcPort << "\n"
-              << "FC Listen Port: " << localFcListenPort << "\n"
+              << "FC (Shared Socket): " << fcIp << ":" << fcPort << "\n"
               << "Log Directory: " << logDir << "\n"
               << "LRF: Auto-detect mode (CP2102 USB)\n";
+#else
+    std::cout << "Starting Radar App Pipeline (Version: " << VERSION << " - " << VERSION_TYPE << ")...\n";
+#endif
+
+    // Khởi tạo 1 UDP Socket dùng chung cho toàn bộ giao tiếp FC (Thread 5, 6, 7) với mavlink-router
+    struct sockaddr_in fcAddr;
+    int fcSharedSock = CreateUdpSocket(fcIp, fcPort, fcAddr);
+    if (fcSharedSock < 0)
+    {
+        std::cerr << "Failed to create shared FC UDP socket to " << fcIp << ":" << fcPort << "\n";
+        return -1;
+    }
+
+    // Cấu hình SO_RCVTIMEO (100ms) và SO_RCVBUF (64KB) cho socket chung
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 100000;
+    setsockopt(fcSharedSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    int rcvbuf = 64 * 1024;
+    setsockopt(fcSharedSock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
     // Khởi tạo 7 Threads
     std::thread t1(ReadDataFromRadarThread, canInterface);
     std::thread t2(DataProcessingThread, logDir, forceLog);
-    std::thread t3(WriteLogThread, logDir, forceLog);
 #if VERSION_TYPE_FOR_DEVELOPMENT
+    std::thread t3(WriteLogThread, logDir, forceLog);
     std::thread t4(SendDataToGcsThread, gcsIp, gcsPort);
 #endif
-    std::thread t5(SendDataToFcThread, fcIp, fcPort, logDir, forceLog);
-    std::thread t6(FcListenerThread, localFcListenPort, altMin, altDis);
-    std::thread t7(LaserRangeFinderThread, fcIp, fcPort);
+    std::thread t5(SendDataToFcThread, fcSharedSock, std::ref(fcAddr), logDir, forceLog);
+    std::thread t6(FcListenerThread, fcSharedSock, std::ref(fcAddr), altMin, altDis);
+    std::thread t7(LaserRangeFinderThread, fcSharedSock, std::ref(fcAddr));
 
     // Join chờ ứng dụng kết thúc
     if (t1.joinable())
         t1.join();
     if (t2.joinable())
         t2.join();
+
+#if VERSION_TYPE_FOR_DEVELOPMENT
     if (t3.joinable())
         t3.join();
-#if VERSION_TYPE_FOR_DEVELOPMENT
     if (t4.joinable())
         t4.join();
 #endif
+
     if (t5.joinable())
         t5.join();
     if (t6.joinable())
         t6.join();
     if (t7.joinable())
         t7.join();
+
+    close(fcSharedSock);
 
     std::cout << "Application successfully terminated.\n";
     return 0;

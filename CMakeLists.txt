@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Cấu hình mặc định Release nếu không chỉ định
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
+endif()
+
+# Cờ tối ưu hóa cho bản Release
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -pipe -march=native -DNDEBUG")
+
 # Các thư mục bao gồm header files
 include_directories(include)
 

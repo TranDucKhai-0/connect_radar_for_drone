@@ -9,13 +9,13 @@ set -e
 mkdir -p build
 cd build
 if command -v cmake &> /dev/null; then
-    cmake ..
+    cmake -DCMAKE_BUILD_TYPE=Release ..
     make >> build.log || true
     # Binary sau cmake nằm tại build/connect_radar_for_drone hoặc build/radar_app
     [ -f connect_radar_for_drone ] && mv connect_radar_for_drone radar_app || true
 else
-    # Compile thẳng ra build/radar_app
-    g++ -std=c++17 -I../include ../src/*.cpp ../src/*.c ../main.cpp -o radar_app -lpthread >> build.log || true
+    # Compile thẳng ra build/radar_app với tối ưu -O3
+    g++ -O3 -pipe -march=native -DNDEBUG -DMAVLINK_COMM_NUM_BUFFERS=4 -std=c++17 -I../include ../src/*.cpp ../src/*.c ../main.cpp -o radar_app -lpthread >> build.log || true
 fi
 cd ..
 

@@ -6,7 +6,8 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define ANGLE_LIMIT_FOV_RAD 0.3490658F // 20 độ (rad) - Giới hạn FOV của radar MR72 (±20 độ quanh trục chính giữa)
+#define ANGLE_LIMIT_FOV_DEGREE 21.0F
+#define ANGLE_LIMIT_FOV_RAD (ANGLE_LIMIT_FOV_DEGREE * (M_PI / 180.0F))
 
 #define RANGE_LIMIT_MIN 2.0F
 #define RANGE_LIMIT_MAX 40.0F
@@ -141,10 +142,10 @@ bool MR72Radar::ParseCanFrame(const struct can_frame &frame, float droneVForward
         // Tới đây
         
         // Lọc theo góc FOV của từng radar (m_id)
-        // if(m_id == 1 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
-        //     isValid = false;
-        // else if (m_id == 2 && std::abs(obs.angle) > ANGLE_LIMIT_FOV_RAD)
-        //     isValid = false;
+        if(m_id == 1 && obs.angle < -ANGLE_LIMIT_FOV_RAD)
+            isValid = false;
+        else if (m_id == 3 && obs.angle < -ANGLE_LIMIT_FOV_RAD)
+            isValid = false;
 
         if (isValid)
         {
